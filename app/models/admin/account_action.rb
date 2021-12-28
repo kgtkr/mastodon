@@ -34,6 +34,7 @@ class Admin::AccountAction
     ApplicationRecord.transaction do
       process_action!
       process_warning!
+      process_strike!
     end
 
     process_email!
@@ -72,6 +73,10 @@ class Admin::AccountAction
     when 'suspend'
       handle_suspend!
     end
+  end
+
+  def process_strike!
+    target_account.strikes.create(report: report)
   end
 
   def process_warning!

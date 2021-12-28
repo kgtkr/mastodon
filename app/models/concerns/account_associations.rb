@@ -34,6 +34,8 @@ module AccountAssociations
     # Report relationships
     has_many :reports, dependent: :destroy, inverse_of: :account
     has_many :targeted_reports, class_name: 'Report', foreign_key: :target_account_id, dependent: :destroy, inverse_of: :target_account
+    has_many :strikes, class_name: 'AccountStrike', inverse_of: :account, dependent: :destroy
+    has_many :appeals, inverse_of: :account, dependent: :destroy
 
     has_many :report_notes, dependent: :destroy
     has_many :custom_filters, inverse_of: :account, dependent: :destroy

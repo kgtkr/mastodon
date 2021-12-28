@@ -15,6 +15,8 @@
 #  assigned_account_id        :bigint(8)
 #  uri                        :string
 #  forwarded                  :boolean
+#  category                   :integer
+#  rule_ids                   :bigint(8)        is an Array
 #
 
 class Report < ApplicationRecord
@@ -35,6 +37,12 @@ class Report < ApplicationRecord
   scope :with_accounts, -> { includes([:account, :target_account, :action_taken_by_account, :assigned_account].index_with({ user: [:invite_request, :invite] })) }
 
   validates :comment, length: { maximum: 1000 }
+
+  enum category: {
+    other: 0,
+    spam: 1_000,
+    violation: 2_000,
+  }
 
   def local?
     false # Force uri_for to use uri attribute
