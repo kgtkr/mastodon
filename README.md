@@ -1,9 +1,10 @@
 ## 更新方法
+* `kgtkr-master`: 独自パッチを当てたメインのブランチ(本家 `main` に対応)
+* `kgtkr-$MINOR_VERSION`: マイナーバージョンごとのブランチ(本家 `stable-$MINOR_VERSION` に対応)
+  * こっちには独自のパッチは当てない。パッチを当てる場合は `kgtkr-master` に当ててからマージする。
+
 ```sh
-$ git fetch --all
-$ git push --tags 
-$ git merge vx.x.x
-$ git push
+$ kgtkr-update.sh x.x.x
 ```
 
 <h1><picture>
