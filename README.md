@@ -1,9 +1,28 @@
 ## 更新方法
+* `kgtkr-master`: 独自パッチを当てたメインのブランチ(本家 `main` に対応)
+* `kgtkr-$MINOR_VERSION`: マイナーバージョンごとのブランチ(本家 `stable-$MINOR_VERSION` に対応)
+  * こっちには独自のパッチは当てない。パッチを当てる場合は `kgtkr-master` に当ててからマージする。
+
 ```sh
+$ MINOR_VERSION=x.x
+$ VERSION=$MINOR_VERSION.x
+
 $ git fetch --all
-$ git push --tags 
-$ git merge vx.x.x
-$ git push
+$ git push --tags
+
+$ git checkout kgtkr-master
+
+# kgtkr-masterのアップデート
+$ git merge $(git merge-base main v$VERSION) # コンフリクト発生の可能性
+$ git push origin kgtkr-master
+
+
+$ git checkout kgtkr-$MINOR_VERSION || git checkout -b kgtkr-$MINOR_VERSION
+
+# kgtkr-$MINOR_VERSION のアップデート
+$ git merge kgtkr-master
+$ git merge v$VERSION
+$ git push origin kgtkr-$MINOR_VERSION
 ```
 
 <h1><picture>
