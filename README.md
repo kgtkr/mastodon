@@ -5,7 +5,8 @@
 * `mstdn.kgtkr.net`: サーバーで使うイメージ用ブランチ。最新の `kgtkr-$MINOR_VERSION` と同一のコミットを参照する(履歴はマイナーバージョンが変わると破壊される)
 
 ```sh
-$ kgtkr-update.sh x.x.x
+# コンフリクトの解消がない場合はkgtkr-update actionsを使っても良い
+$ ./kgtkr-update.sh x.x.x
 ```
 
 <h1><picture>
