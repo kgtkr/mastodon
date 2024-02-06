@@ -1,0 +1,19 @@
+name: kgtkr-update
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: 'The version of Mastodon'
+        required: true
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          GIT_MERGE_AUTOEDIT=no ./kgtkr-update.sh "$VERSION"
+        env:
+          VERSION: ${{ github.event.inputs.version }}
