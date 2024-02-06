@@ -1,5 +1,9 @@
 name: kgtkr-build-image
-on: push
+on:
+  push:
+    branches:
+      - kgtkr-*.*
+      - mstdn.kgtkr.net
 permissions:
   contents: read
   packages: write
@@ -25,7 +29,10 @@ jobs:
         with:
           name: ghcr.io/${{ github.repository_owner }}/mastodon
       - id: base_tag
-        run: echo BASE_TAG=$(git describe --abbrev=0 --tag) >> $GITHUB_OUTPUT
+        run: |
+          BASE_TAG=$(git describe --abbrev=0 --tag)
+          echo BASE_TAG=$BASE_TAG
+          echo BASE_TAG=$BASE_TAG >> $GITHUB_OUTPUT
       - uses: docker/build-push-action@v4
         with:
           context: .
