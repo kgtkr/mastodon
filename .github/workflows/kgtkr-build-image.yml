@@ -1,9 +1,5 @@
 name: kgtkr-build-image
-on:
-  push:
-    branches:
-      - kgtkr-*.*
-      - mstdn.kgtkr.net
+on: push
 permissions:
   contents: read
   packages: write
