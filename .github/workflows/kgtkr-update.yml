@@ -18,7 +18,7 @@ jobs:
       - run: |
           git config --global user.name "kgtkr actions"
           git config --global user.email "actions@kgtkr.net"
-          ~/.netrc <<EOF
+          cat <<EOF > ~/.netrc
           machine github.com
           login ${{ secrets.GITHUB_ACTOR }}
           password ${{ secrets.PAT }}
