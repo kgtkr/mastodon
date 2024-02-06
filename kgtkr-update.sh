@@ -9,6 +9,7 @@ git fetch --all
 git push --tags
 
 git checkout kgtkr-master
+git pull
 
 # kgtkr-masterのアップデート
 git merge $(git merge-base main v$VERSION) # コンフリクト発生の可能性
@@ -16,6 +17,7 @@ git push origin kgtkr-master
 
 
 git checkout kgtkr-$MINOR_VERSION || git checkout -b kgtkr-$MINOR_VERSION
+git pull
 
 # kgtkr-$MINOR_VERSION のアップデート
 git merge kgtkr-master
