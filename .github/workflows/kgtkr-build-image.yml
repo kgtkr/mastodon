@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - kgtkr-*.*
+      - mstdn.kgtkr.net
 permissions:
   contents: read
   packages: write

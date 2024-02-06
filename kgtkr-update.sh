@@ -24,4 +24,9 @@ git merge kgtkr-master
 git merge v$VERSION
 git push origin kgtkr-$MINOR_VERSION
 
+# kgtkr.mstdn.net のアップデート
+git checkout kgtkr.mstdn.net
+git reset --hard kgtkr-$MINOR_VERSION
+git push -f origin kgtkr.mstdn.net
+
 git checkout kgtkr-master
