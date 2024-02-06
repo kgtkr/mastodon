@@ -6,8 +6,6 @@ on:
         type: string
         description: 'The version of Mastodon'
         required: true
-permissions:
-  contents: write
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -15,14 +13,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.PAT }}
       - run: |
           git config --global user.name "kgtkr actions"
           git config --global user.email "actions@kgtkr.net"
-          cat <<EOF > ~/.netrc
-          machine github.com
-          login ${{ secrets.GITHUB_ACTOR }}
-          password ${{ secrets.PAT }}
-          EOF
       - run: GIT_MERGE_AUTOEDIT=no ./kgtkr-update.sh "$VERSION"
         env:
           VERSION: ${{ github.event.inputs.version }}
