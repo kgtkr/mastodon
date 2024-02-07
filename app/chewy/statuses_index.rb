@@ -15,15 +15,10 @@ class StatusesIndex < Chewy::Index
         type: 'stop',
         stopwords: '_english_',
       },
-      sudachi_split_filter: {
-        type: 'sudachi_split',
-        mode: 'search',
-      },
       english_stemmer: {
         type: 'stemmer',
         language: 'english',
       },
-
       english_possessive_stemmer: {
         type: 'stemmer',
         language: 'possessive_english',
