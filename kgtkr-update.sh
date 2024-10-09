@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eu
+set -eux
 
 VERSION_ARR=(${1//./ })
 MINOR_VERSION=${VERSION_ARR[0]}.${VERSION_ARR[1]}
