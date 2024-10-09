@@ -1,0 +1,22 @@
+name: kgtkr-update
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: 'The version of Mastodon'
+        required: true
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT }} # GITHUB_TOKENを使ったpushは別のアクションをトリガーしないのでPATを使う
+      - run: |
+          git config --global user.name "kgtkr actions"
+          git config --global user.email "actions@kgtkr.net"
+      - run: GIT_MERGE_AUTOEDIT=no ./kgtkr-update.sh "$VERSION"
+        env:
+          VERSION: ${{ github.event.inputs.version }}
