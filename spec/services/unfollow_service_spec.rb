@@ -2,57 +2,60 @@
 
 require 'rails_helper'
 
-RSpec.describe UnfollowService, type: :service do
+RSpec.describe UnfollowService do
   subject { described_class.new }
 
-  let(:sender) { Fabricate(:account, username: 'alice') }
+  let(:follower) { Fabricate(:account) }
+  let(:followee) { Fabricate(:account) }
 
-  describe 'local' do
-    let(:bob) { Fabricate(:account, username: 'bob') }
+  before do
+    follower.follow!(followee)
+  end
+
+  shared_examples 'when the followee is in a list' do
+    let(:list) { Fabricate(:list, account: follower) }
 
     before do
-      sender.follow!(bob)
-      subject.call(sender, bob)
+      list.accounts << followee
     end
 
-    it 'destroys the following relation' do
-      expect(sender.following?(bob)).to be false
+    it 'schedules removal of posts from this user from the list' do
+      expect { subject.call(follower, followee) }
+        .to enqueue_sidekiq_job(UnmergeWorker).with(followee.id, list.id, 'list')
     end
   end
 
-  describe 'remote ActivityPub' do
-    let(:bob) { Fabricate(:account, username: 'bob', protocol: :activitypub, domain: 'example.com', inbox_url: 'http://example.com/inbox') }
-
-    before do
-      sender.follow!(bob)
-      stub_request(:post, 'http://example.com/inbox').to_return(status: 200)
-      subject.call(sender, bob)
+  describe 'a local user unfollowing another local user' do
+    it 'destroys the following relation and unmerge from home' do
+      expect { subject.call(follower, followee) }
+        .to change { follower.following?(followee) }.from(true).to(false)
+        .and enqueue_sidekiq_job(UnmergeWorker).with(followee.id, follower.id, 'home')
     end
 
-    it 'destroys the following relation' do
-      expect(sender.following?(bob)).to be false
-    end
-
-    it 'sends an unfollow activity' do
-      expect(a_request(:post, 'http://example.com/inbox')).to have_been_made.once
-    end
+    it_behaves_like 'when the followee is in a list'
   end
 
-  describe 'remote ActivityPub (reverse)' do
-    let(:bob) { Fabricate(:account, username: 'bob', protocol: :activitypub, domain: 'example.com', inbox_url: 'http://example.com/inbox') }
+  describe 'a local user unfollowing a remote ActivityPub user' do
+    let(:followee) { Fabricate(:account, username: 'bob', protocol: :activitypub, domain: 'example.com', inbox_url: 'http://example.com/inbox') }
 
-    before do
-      bob.follow!(sender)
-      stub_request(:post, 'http://example.com/inbox').to_return(status: 200)
-      subject.call(bob, sender)
+    it 'destroys the following relation, unmerge from home and sends undo activity' do
+      expect { subject.call(follower, followee) }
+        .to change { follower.following?(followee) }.from(true).to(false)
+        .and enqueue_sidekiq_job(UnmergeWorker).with(followee.id, follower.id, 'home')
+        .and enqueue_sidekiq_job(ActivityPub::DeliveryWorker).with(match_json_values(type: 'Undo'), follower.id, followee.inbox_url)
     end
 
-    it 'destroys the following relation' do
-      expect(bob.following?(sender)).to be false
-    end
+    it_behaves_like 'when the followee is in a list'
+  end
 
-    it 'sends a reject activity' do
-      expect(a_request(:post, 'http://example.com/inbox')).to have_been_made.once
+  describe 'a remote ActivityPub user unfollowing a local user' do
+    let(:follower) { Fabricate(:account, username: 'bob', protocol: :activitypub, domain: 'example.com', inbox_url: 'http://example.com/inbox') }
+
+    it 'destroys the following relation, unmerge from home and sends a reject activity' do
+      expect { subject.call(follower, followee) }
+        .to change { follower.following?(followee) }.from(true).to(false)
+        .and enqueue_sidekiq_job(UnmergeWorker).with(followee.id, follower.id, 'home')
+        .and enqueue_sidekiq_job(ActivityPub::DeliveryWorker).with(match_json_values(type: 'Reject'), followee.id, follower.inbox_url)
     end
   end
 end

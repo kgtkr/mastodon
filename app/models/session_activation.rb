@@ -5,17 +5,19 @@
 # Table name: session_activations
 #
 #  id                       :bigint(8)        not null, primary key
-#  session_id               :string           not null
+#  ip                       :inet
+#  user_agent               :string           default(""), not null
 #  created_at               :datetime         not null
 #  updated_at               :datetime         not null
-#  user_agent               :string           default(""), not null
-#  ip                       :inet
 #  access_token_id          :bigint(8)
+#  session_id               :string           not null
 #  user_id                  :bigint(8)        not null
 #  web_push_subscription_id :bigint(8)
 #
 
 class SessionActivation < ApplicationRecord
+  include BrowserDetection
+
   belongs_to :user, inverse_of: :session_activations
   belongs_to :access_token, class_name: 'Doorkeeper::AccessToken', dependent: :destroy, optional: true
   belongs_to :web_push_subscription, class_name: 'Web::PushSubscription', dependent: :destroy, optional: true
@@ -24,30 +26,19 @@ class SessionActivation < ApplicationRecord
            to: :access_token,
            allow_nil: true
 
-  def detection
-    @detection ||= Browser.new(user_agent)
-  end
-
-  def browser
-    detection.id
-  end
-
-  def platform
-    detection.platform.id
-  end
-
-  before_save   :assign_user_agent
   before_create :assign_access_token
+
+  DEFAULT_SCOPES = %w(read write follow).freeze
+
+  scope :latest, -> { order(id: :desc) }
 
   class << self
     def active?(id)
-      id && where(session_id: id).exists?
+      id && exists?(session_id: id)
     end
 
-    def activate(**options)
-      activation = create!(**options)
-      purge_old
-      activation
+    def activate(**)
+      create!(**).tap { purge_old }
     end
 
     def deactivate(id)
@@ -57,7 +48,7 @@ class SessionActivation < ApplicationRecord
     end
 
     def purge_old
-      order('created_at desc').offset(Rails.configuration.x.max_session_activations).destroy_all
+      latest.offset(Rails.configuration.x.max_session_activations).destroy_all
     end
 
     def exclusive(id)
@@ -67,10 +58,6 @@ class SessionActivation < ApplicationRecord
 
   private
 
-  def assign_user_agent
-    self.user_agent = '' if user_agent.nil?
-  end
-
   def assign_access_token
     self.access_token = Doorkeeper::AccessToken.create!(access_token_attributes)
   end
@@ -79,7 +66,7 @@ class SessionActivation < ApplicationRecord
     {
       application_id: Doorkeeper::Application.find_by(superapp: true)&.id,
       resource_owner_id: user_id,
-      scopes: 'read write follow',
+      scopes: DEFAULT_SCOPES.join(' '),
       expires_in: Doorkeeper.configuration.access_token_expires_in,
       use_refresh_token: Doorkeeper.configuration.refresh_token_enabled?,
     }

@@ -13,6 +13,7 @@ class Settings::ImportsController < Settings::BaseController
     domain_blocking: 'blocked_domains_failures.csv',
     bookmarks: 'bookmarks_failures.csv',
     lists: 'lists_failures.csv',
+    custom_filters: 'custom_filters_failures.json',
   }.freeze
 
   TYPE_TO_HEADERS_MAP = {
@@ -24,6 +25,8 @@ class Settings::ImportsController < Settings::BaseController
     lists: false,
   }.freeze
 
+  RECENT_IMPORTS_LIMIT = 10
+
   def index
     @import = Form::Import.new(current_account: current_account)
   end
@@ -31,7 +34,7 @@ class Settings::ImportsController < Settings::BaseController
   def show; end
 
   def failures
-    @bulk_import = current_account.bulk_imports.where(state: :finished).find(params[:id])
+    @bulk_import = current_account.bulk_imports.state_finished.find(params[:id])
 
     respond_to do |format|
       format.csv do
@@ -56,6 +59,21 @@ class Settings::ImportsController < Settings::BaseController
             end
           end
         end
+
+        send_data export_data, filename: filename
+      end
+
+      format.json do
+        filename = TYPE_TO_FILENAME_MAP[@bulk_import.type.to_sym]
+
+        data_collection = { custom_filters: [] }
+        @bulk_import.rows.find_each do |row|
+          case @bulk_import.type.to_sym
+          when :custom_filters
+            data_collection[:custom_filters] << row.data
+          end
+        end
+        export_data = JSON.generate(data_collection)
 
         send_data export_data, filename: filename
       end
@@ -88,14 +106,14 @@ class Settings::ImportsController < Settings::BaseController
   private
 
   def import_params
-    params.require(:form_import).permit(:data, :type, :mode)
+    params.expect(form_import: [:data, :type, :mode])
   end
 
   def set_bulk_import
-    @bulk_import = current_account.bulk_imports.where(state: :unconfirmed).find(params[:id])
+    @bulk_import = current_account.bulk_imports.state_unconfirmed.find(params[:id])
   end
 
   def set_recent_imports
-    @recent_imports = current_account.bulk_imports.reorder(id: :desc).limit(10)
+    @recent_imports = current_account.bulk_imports.reorder(id: :desc).limit(RECENT_IMPORTS_LIMIT)
   end
 end

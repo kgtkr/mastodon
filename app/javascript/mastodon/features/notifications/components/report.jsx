@@ -1,11 +1,12 @@
 import PropTypes from 'prop-types';
 
-import { defineMessages, FormattedMessage, injectIntl } from 'react-intl';
+import { defineMessages, FormattedMessage } from 'react-intl';
 
 import ImmutablePropTypes from 'react-immutable-proptypes';
 import ImmutablePureComponent from 'react-immutable-pure-component';
 
 import { AvatarOverlay } from 'mastodon/components/avatar_overlay';
+import { injectIntl } from '@/mastodon/components/intl';
 import { RelativeTimestamp } from 'mastodon/components/relative_timestamp';
 
 // This needs to be kept in sync with app/models/report.rb
@@ -20,7 +21,7 @@ const messages = defineMessages({
 class Report extends ImmutablePureComponent {
 
   static propTypes = {
-    account: ImmutablePropTypes.map.isRequired,
+    account: ImmutablePropTypes.record.isRequired,
     report: ImmutablePropTypes.map.isRequired,
     hidden: PropTypes.bool,
     intl: PropTypes.object.isRequired,
@@ -49,13 +50,13 @@ class Report extends ImmutablePureComponent {
 
         <div className='notification__report__details'>
           <div>
-            <RelativeTimestamp timestamp={report.get('created_at')} short={false} /> · <FormattedMessage id='report_notification.attached_statuses' defaultMessage='{count, plural, one {# post} other {# posts}} attached' values={{ count: report.get('status_ids').size }} />
+            <RelativeTimestamp timestamp={report.get('created_at')} long /> · <FormattedMessage id='report_notification.attached_statuses' defaultMessage='{count, plural, one {# post} other {# posts}} attached' values={{ count: report.get('status_ids').size }} />
             <br />
             <strong>{intl.formatMessage(messages[report.get('category')])}</strong>
           </div>
 
           <div className='notification__report__actions'>
-            <a href={`/admin/reports/${report.get('id')}`} className='button' target='_blank' rel='noopener noreferrer'>{intl.formatMessage(messages.openReport)}</a>
+            <a href={`/admin/reports/${report.get('id')}`} className='button' target='_blank' rel='noopener'>{intl.formatMessage(messages.openReport)}</a>
           </div>
         </div>
       </div>

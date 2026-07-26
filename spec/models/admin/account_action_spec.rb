@@ -8,15 +8,17 @@ RSpec.describe Admin::AccountAction do
   describe '#save!' do
     subject              { account_action.save! }
 
-    let(:account)        { Fabricate(:user, role: UserRole.find_by(name: 'Admin')).account }
+    let(:account)        { Fabricate(:admin_user).account }
     let(:target_account) { Fabricate(:account) }
     let(:type)           { 'disable' }
+    let(:text)           { nil }
 
     before do
       account_action.assign_attributes(
         type: type,
         current_account: account,
-        target_account: target_account
+        target_account: target_account,
+        text:
       )
     end
 
@@ -47,10 +49,22 @@ RSpec.describe Admin::AccountAction do
       end
 
       it 'queues Admin::SuspensionWorker by 1' do
-        Sidekiq::Testing.fake! do
-          expect do
-            subject
-          end.to change { Admin::SuspensionWorker.jobs.size }.by 1
+        expect do
+          subject
+        end.to change { Admin::SuspensionWorker.jobs.size }.by 1
+      end
+    end
+
+    context 'when type is `none`' do
+      let(:type) { 'none' }
+
+      context 'when a custom text is given' do
+        let(:text) { 'custom' }
+
+        it 'logs the action' do
+          expect { subject }.to change(Admin::ActionLog, :count).by(1)
+
+          expect(Admin::ActionLog.last.target.text).to eq 'custom'
         end
       end
     end
@@ -71,20 +85,24 @@ RSpec.describe Admin::AccountAction do
       end
     end
 
-    it 'creates Admin::ActionLog' do
-      expect do
-        subject
-      end.to change(Admin::ActionLog, :count).by 1
+    it 'sends email to target account user', :inline_jobs do
+      emails = capture_emails { subject }
+
+      expect(emails).to contain_exactly(
+        have_attributes(
+          to: contain_exactly(target_account.user.email)
+        )
+      )
     end
 
-    it 'calls process_email!' do
-      expect(account_action).to receive(:process_email!)
-      subject
-    end
+    it 'sends notification, log the action, and closes other reports', :aggregate_failures do
+      other_report = Fabricate(:report, target_account: target_account)
 
-    it 'calls process_reports!' do
-      expect(account_action).to receive(:process_reports!)
-      subject
+      expect { subject }
+        .to (change(Admin::ActionLog.where(action: type), :count).by 1)
+        .and(change { other_report.reload.action_taken? }.from(false).to(true))
+
+      expect(LocalNotificationWorker).to have_enqueued_sidekiq_job(target_account.id, anything, 'AccountWarning', 'moderation_warning')
     end
   end
 

@@ -1,25 +1,25 @@
 # frozen_string_literal: true
 
 class Auth::SessionsController < Devise::SessionsController
+  include Redisable
+
+  MAX_2FA_ATTEMPTS_PER_HOUR = 10
+
   layout 'auth'
 
+  skip_before_action :check_self_destruct!
   skip_before_action :require_no_authentication, only: [:create]
   skip_before_action :require_functional!
   skip_before_action :update_user_sign_in
 
+  around_action :preserve_stored_location, only: :destroy, if: :continue_after?
+
   prepend_before_action :check_suspicious!, only: [:create]
 
-  include TwoFactorAuthenticationConcern
-
-  before_action :set_body_classes
+  include Auth::TwoFactorAuthenticationConcern
 
   content_security_policy only: :new do |p|
     p.form_action(false)
-  end
-
-  def check_suspicious!
-    user = find_user
-    @login_is_suspicious = suspicious_sign_in?(user) unless user.nil?
   end
 
   def create
@@ -33,28 +33,9 @@ class Auth::SessionsController < Devise::SessionsController
   end
 
   def destroy
-    tmp_stored_location = stored_location_for(:user)
     super
     session.delete(:challenge_passed_at)
     flash.delete(:notice)
-    store_location_for(:user, tmp_stored_location) if continue_after?
-  end
-
-  def webauthn_options
-    user = User.find_by(id: session[:attempt_user_id])
-
-    if user&.webauthn_enabled?
-      options_for_get = WebAuthn::Credential.options_for_get(
-        allow: user.webauthn_credentials.pluck(:external_id),
-        user_verification: 'discouraged'
-      )
-
-      session[:webauthn_challenge] = options_for_get.challenge
-
-      render json: options_for_get, status: 200
-    else
-      render json: { error: t('webauthn_credentials.not_enabled') }, status: 401
-    end
   end
 
   protected
@@ -75,7 +56,7 @@ class Auth::SessionsController < Devise::SessionsController
   end
 
   def user_params
-    params.require(:user).permit(:email, :password, :otp_attempt, credential: {})
+    params.expect(user: [:email, :password, :otp_attempt, credential: {}])
   end
 
   def after_sign_in_path_for(resource)
@@ -98,8 +79,15 @@ class Auth::SessionsController < Devise::SessionsController
 
   private
 
-  def set_body_classes
-    @body_classes = 'lighter'
+  def preserve_stored_location
+    original_stored_location = stored_location_for(:user)
+    yield
+    store_location_for(:user, original_stored_location)
+  end
+
+  def check_suspicious!
+    user = find_user
+    @login_is_suspicious = suspicious_sign_in?(user) unless user.nil?
   end
 
   def home_paths(resource)
@@ -129,21 +117,34 @@ class Auth::SessionsController < Devise::SessionsController
     session.delete(:attempt_user_updated_at)
   end
 
+  def clear_2fa_attempt_from_user(user)
+    redis.del(second_factor_attempts_key(user))
+  end
+
+  def check_second_factor_rate_limits(user)
+    attempts, = redis.multi do |multi|
+      multi.incr(second_factor_attempts_key(user))
+      multi.expire(second_factor_attempts_key(user), 1.hour)
+    end
+
+    attempts >= MAX_2FA_ATTEMPTS_PER_HOUR
+  end
+
   def on_authentication_success(user, security_measure)
     @on_authentication_success_called = true
 
+    clear_2fa_attempt_from_user(user)
     clear_attempt_from_session
 
     user.update_sign_in!(new_sign_in: true)
     sign_in(user)
     flash.delete(:notice)
 
-    LoginActivity.create(
-      user: user,
-      success: true,
-      authentication_method: security_measure,
-      ip: request.remote_ip,
-      user_agent: request.user_agent
+    user.login_activities.create(
+      request_details.merge(
+        authentication_method: security_measure,
+        success: true
+      )
     )
 
     UserMailer.suspicious_sign_in(user, request.remote_ip, request.user_agent, Time.now.utc).deliver_later! if @login_is_suspicious
@@ -154,13 +155,39 @@ class Auth::SessionsController < Devise::SessionsController
   end
 
   def on_authentication_failure(user, security_measure, failure_reason)
-    LoginActivity.create(
-      user: user,
-      success: false,
-      authentication_method: security_measure,
-      failure_reason: failure_reason,
-      ip: request.remote_ip,
-      user_agent: request.user_agent
+    user.login_activities.create(
+      request_details.merge(
+        authentication_method: security_measure,
+        failure_reason: failure_reason,
+        success: false
+      )
     )
+
+    # Only send a notification email every hour at most
+    return if redis.set("2fa_failure_notification:#{user.id}", '1', ex: 1.hour, get: true).present?
+
+    UserMailer.failed_2fa(user, request.remote_ip, request.user_agent, Time.now.utc).deliver_later!
+  end
+
+  def request_details
+    {
+      ip: request.remote_ip,
+      user_agent: request.user_agent,
+    }
+  end
+
+  def second_factor_attempts_key(user)
+    "2fa_auth_attempts:#{user.id}:#{Time.now.utc.hour}"
+  end
+
+  def respond_to_on_destroy(**)
+    respond_to do |format|
+      format.json do
+        render json: {
+          redirect_to: after_sign_out_path_for(resource_name),
+        }, status: 200
+      end
+      format.all { super(**) }
+    end
   end
 end

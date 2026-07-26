@@ -13,9 +13,11 @@ module Admin
       authorize @report, :show?
 
       @report_note  = @report.notes.new
-      @report_notes = @report.notes.includes(:account).order(id: :desc)
+      @report_notes = @report.notes.chronological.includes(:account)
       @action_logs  = @report.history.includes(:target)
       @form         = Admin::StatusBatchAction.new
+      @collection_form = Admin::CollectionBatchAction.new
+      @collections  = @report.collections
       @statuses     = @report.statuses.with_includes
     end
 
@@ -50,7 +52,7 @@ module Admin
     private
 
     def filtered_reports
-      ReportFilter.new(filter_params).results.order(id: :desc).includes(:account, :target_account)
+      ReportFilter.new(filter_params).results.order(id: :desc).includes(:account, :target_account, :collections)
     end
 
     def filter_params
@@ -58,7 +60,7 @@ module Admin
     end
 
     def set_report
-      @report = Report.find(params[:id])
+      @report = Report.includes(collections: :accepted_collection_items).find(params[:id])
     end
   end
 end

@@ -5,24 +5,31 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
   include Redisable
   include Lockable
 
+  CRAWL_DELAY = 1.minute
+  PROCESSING_DELAY = (30.seconds)..(10.minutes)
+
   def call(status, activity_json, object_json, request_id: nil)
     raise ArgumentError, 'Status has unsaved changes' if status.changed?
 
     @activity_json             = activity_json
     @json                      = object_json
-    @status_parser             = ActivityPub::Parser::StatusParser.new(@json)
+    @status_parser             = ActivityPub::Parser::StatusParser.new(@json, followers_collection: status.account.followers_url, following_collection: status.account.following_url, actor_uri: ActivityPub::TagManager.instance.uri_for(status.account))
     @uri                       = @status_parser.uri
     @status                    = status
     @account                   = status.account
     @media_attachments_changed = false
     @poll_changed              = false
+    @quote_changed             = false
     @request_id                = request_id
+    @quote                     = nil
 
-    # Only native types can be updated at the moment
     return @status if !expected_type? || already_updated_more_recently?
 
     if @status_parser.edited_at.present? && (@status.edited_at.nil? || @status_parser.edited_at > @status.edited_at)
       handle_explicit_update!
+    elsif @status.edited_at.present? && (@status_parser.edited_at.nil? || @status_parser.edited_at < @status.edited_at)
+      # This is an older update, reject it
+      return @status
     else
       handle_implicit_update!
     end
@@ -40,12 +47,15 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
       Status.transaction do
         record_previous_edit!
         update_media_attachments!
+        update_interaction_policies!
         update_poll!
         update_immediate_attributes!
         update_metadata!
+        update_counts!
         create_edits!
       end
 
+      fetch_and_verify_quote!(@quote, @quote_approval_uri, @status_parser.quote_uri) if @quote.present?
       download_media_files!
       queue_poll_notifications!
 
@@ -60,9 +70,18 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
 
   def handle_implicit_update!
     with_redis_lock("create:#{@uri}") do
+      update_interaction_policies!
       update_poll!(allow_significant_changes: false)
       queue_poll_notifications!
+      update_quote_approval!
+      update_counts!
     end
+
+    broadcast_updates! if @status.quote&.state_previously_changed?
+  end
+
+  def update_interaction_policies!
+    @status.update(quote_approval_policy: @status_parser.quote_policy)
   end
 
   def update_media_attachments!
@@ -73,7 +92,7 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
     as_array(@json['attachment']).each do |attachment|
       media_attachment_parser = ActivityPub::Parser::MediaAttachmentParser.new(attachment)
 
-      next if media_attachment_parser.remote_url.blank? || @next_media_attachments.size > 4
+      next if media_attachment_parser.remote_url.blank? || @next_media_attachments.size > Status::MEDIA_ATTACHMENTS_LIMIT
 
       begin
         media_attachment   = previous_media_attachments.find { |previous_media_attachment| previous_media_attachment.remote_url == media_attachment_parser.remote_url }
@@ -97,11 +116,11 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
       end
     end
 
-    added_media_attachments = @next_media_attachments - previous_media_attachments
-
     @status.ordered_media_attachment_ids = @next_media_attachments.map(&:id)
 
     @media_attachments_changed = true if @status.ordered_media_attachment_ids != previous_media_attachments_ids
+
+    @status.media_attachments.reload if @media_attachments_changed
   end
 
   def download_media_files!
@@ -111,8 +130,8 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
       media_attachment.download_file! if media_attachment.remote_url_previously_changed?
       media_attachment.download_thumbnail! if media_attachment.thumbnail_remote_url_previously_changed?
       media_attachment.save
-    rescue Mastodon::UnexpectedResponseError, HTTP::TimeoutError, HTTP::ConnectionError, OpenSSL::SSL::SSLError
-      RedownloadMediaWorker.perform_in(rand(30..600).seconds, media_attachment.id)
+    rescue Mastodon::UnexpectedResponseError, *Mastodon::HTTP_CONNECTION_ERRORS
+      RedownloadMediaWorker.perform_in(rand(PROCESSING_DELAY), media_attachment.id)
     rescue Seahorse::Client::NetworkingError => e
       Rails.logger.warn "Error storing media attachment: #{e}"
     end
@@ -153,12 +172,12 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
   end
 
   def update_immediate_attributes!
-    @status.text         = @status_parser.text || ''
-    @status.spoiler_text = @status_parser.spoiler_text || ''
+    @status.text         = @status_parser.processed_text
+    @status.spoiler_text = @status_parser.processed_spoiler_text
     @status.sensitive    = @account.sensitized? || @status_parser.sensitive || false
     @status.language     = @status_parser.language
 
-    @significant_changes = text_significantly_changed? || @status.spoiler_text_changed? || @media_attachments_changed || @poll_changed
+    @significant_changes = text_significantly_changed? || @status.spoiler_text_changed? || @media_attachments_changed || @poll_changed || @quote_changed
 
     @status.edited_at = @status_parser.edited_at if significant_changes?
 
@@ -166,57 +185,121 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
   end
 
   def update_metadata!
-    @raw_tags     = []
+    @raw_tags = []
     @raw_mentions = []
-    @raw_emojis   = []
+    @raw_tagged_objects = []
+    @raw_emojis = []
 
     as_array(@json['tag']).each do |tag|
       if equals_or_includes?(tag['type'], 'Hashtag')
-        @raw_tags << tag['name']
+        @raw_tags << tag['name'] if tag['name'].present?
       elsif equals_or_includes?(tag['type'], 'Mention')
-        @raw_mentions << tag['href']
+        @raw_mentions << tag['href'] if tag['href'].present?
       elsif equals_or_includes?(tag['type'], 'Emoji')
         @raw_emojis << tag
+      elsif equals_or_includes?(tag['type'], 'FeaturedCollection')
+        @raw_tagged_objects << tag if tag['id']
       end
     end
 
     update_tags!
+    update_tagged_objects!
     update_mentions!
     update_emojis!
+    update_quote!
   end
 
   def update_tags!
-    @status.tags = Tag.find_or_create_by_names(@raw_tags)
+    previous_tags = @status.tags.to_a
+    current_tags = @status.tags = @raw_tags.flat_map do |tag|
+      Tag.find_or_create_by_names([tag])
+    rescue ActiveRecord::RecordInvalid
+      []
+    end.uniq
+
+    return unless @status.distributable?
+
+    added_tags = current_tags - previous_tags
+
+    unless added_tags.empty?
+      @account.featured_tags.where(tag_id: added_tags.pluck(:id)).find_each do |featured_tag|
+        featured_tag.increment(@status.created_at)
+      end
+    end
+
+    removed_tags = previous_tags - current_tags
+
+    unless removed_tags.empty?
+      @account.featured_tags.where(tag_id: removed_tags.pluck(:id)).find_each do |featured_tag|
+        featured_tag.decrement(@status)
+      end
+    end
+  end
+
+  def update_tagged_objects!
+    unresolved_tagged_objects = []
+
+    current_tagged_objects = @raw_tagged_objects.filter_map do |tagged_object|
+      url = tagged_object['id']
+
+      # TODO: We probably want to resolve unknown objects at authoring time
+      collection = ActivityPub::TagManager.instance.uri_to_resource(url, Collection)
+      collection ||= ActivityPub::FetchRemoteFeaturedCollectionService.new.call(url, request_id: @request_id)
+
+      collection
+    rescue Mastodon::UnexpectedResponseError, *Mastodon::HTTP_CONNECTION_ERRORS
+      # Since previous tagged objects are about already-known collections,
+      # they don't try to resolve again and won't fall into this case.
+      # In other words, this failure case is only for new collections and can safely be retried later
+      unresolved_tagged_objects << url
+      nil
+    end
+
+    # Any previously-unresolved URI would be resolved here
+    @status.tagged_objects.upsert_all(
+      current_tagged_objects.uniq.map { |object| { object_type: object.class.name, object_id: object.id, uri: ActivityPub::TagManager.instance.uri_for(object), ap_type: 'FeaturedCollection' } },
+      unique_by: %w(status_id uri)
+    )
+
+    # Remove unused links
+    @status.tagged_objects.where.not(uri: current_tagged_objects.map { |object| ActivityPub::TagManager.instance.uri_for(object) }).delete_all
+
+    # Queue unresolved collections for later
+    unresolved_tagged_objects.uniq.each do |uri|
+      TaggedCollectionResolveWorker.perform_in(rand(PROCESSING_DELAY), @status.id, uri, { 'request_id' => @request_id })
+    end
   end
 
   def update_mentions!
-    previous_mentions = @status.active_mentions.includes(:account).to_a
-    current_mentions  = []
+    unresolved_mentions = []
 
-    @raw_mentions.each do |href|
+    currently_mentioned_account_ids = @raw_mentions.filter_map do |href|
       next if href.blank?
 
       account   = ActivityPub::TagManager.instance.uri_to_resource(href, Account)
       account ||= ActivityPub::FetchRemoteAccountService.new.call(href, request_id: @request_id)
 
-      next if account.nil?
-
-      mention   = previous_mentions.find { |x| x.account_id == account.id }
-      mention ||= account.mentions.new(status: @status)
-
-      current_mentions << mention
+      account&.id
+    rescue Mastodon::UnexpectedResponseError, *Mastodon::HTTP_CONNECTION_ERRORS
+      # Since previous mentions are about already-known accounts,
+      # they don't try to resolve again and won't fall into this case.
+      # In other words, this failure case is only for new mentions and won't
+      # affect `removed_mentions` so they can safely be retried asynchronously
+      unresolved_mentions << href
+      nil
     end
 
-    current_mentions.each do |mention|
-      mention.save if mention.new_record?
-    end
+    @status.mentions.upsert_all(currently_mentioned_account_ids.uniq.map { |id| { account_id: id, silent: false } }, unique_by: %w(status_id account_id))
 
     # If previous mentions are no longer contained in the text, convert them
     # to silent mentions, since withdrawing access from someone who already
     # received a notification might be more confusing
-    removed_mentions = previous_mentions - current_mentions
+    @status.mentions.where.not(account_id: currently_mentioned_account_ids).update_all(silent: true)
 
-    Mention.where(id: removed_mentions.map(&:id)).update_all(silent: true) unless removed_mentions.empty?
+    # Queue unresolved mentions for later
+    unresolved_mentions.uniq.each do |uri|
+      MentionResolveWorker.perform_in(rand(PROCESSING_DELAY), @status.id, uri, { 'request_id' => @request_id })
+    end
   end
 
   def update_emojis!
@@ -241,8 +324,80 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
     end
   end
 
+  # This method is only concerned with approval and skips other meaningful changes,
+  # as it is used instead of `update_quote!` in implicit updates
+  def update_quote_approval!
+    quote_uri = @status_parser.quote_uri
+    return unless quote_uri.present? && @status.quote.present?
+
+    quote = @status.quote
+    return if quote.quoted_status.present? && (ActivityPub::TagManager.instance.uri_for(quote.quoted_status) != quote_uri || quote.quoted_status.local?)
+
+    approval_uri = @status_parser.quote_approval_uri
+    approval_uri = nil if unsupported_uri_scheme?(approval_uri) || TagManager.instance.local_url?(approval_uri)
+
+    quote.update(approval_uri: nil, state: :pending, legacy: @status_parser.legacy_quote?) if quote.approval_uri.present? && quote.approval_uri != @status_parser.quote_approval_uri
+
+    fetch_and_verify_quote!(quote, approval_uri, quote_uri)
+  end
+
+  def update_quote!
+    quote_uri = @status_parser.quote_uri
+
+    if @status_parser.quote?
+      approval_uri = @status_parser.quote_approval_uri
+      approval_uri = nil if unsupported_uri_scheme?(approval_uri) || TagManager.instance.local_url?(approval_uri)
+
+      if @status.quote.present?
+        # If the quoted post has changed, discard the old object and create a new one
+        if @status.quote.quoted_status.present? && ActivityPub::TagManager.instance.uri_for(@status.quote.quoted_status) != quote_uri
+          # Revoke the quote while we get a chance… maybe this should be a `before_destroy` hook?
+          RevokeQuoteService.new.call(@status.quote) if @status.quote.quoted_account&.local? && @status.quote.accepted?
+          @status.quote.destroy
+          quote = Quote.create(status: @status, approval_uri: nil, legacy: @status_parser.legacy_quote?, state: @status_parser.deleted_quote? ? :deleted : :pending)
+          @quote_changed = true
+        else
+          quote = @status.quote
+          quote.update(approval_uri: nil, state: :pending, legacy: @status_parser.legacy_quote?) if quote.approval_uri.present? && quote.approval_uri != approval_uri
+        end
+      else
+        quote = Quote.create(status: @status, approval_uri: nil, legacy: @status_parser.legacy_quote?)
+        @quote_changed = true
+      end
+
+      @quote = quote
+      @quote_approval_uri = approval_uri
+
+      quote.save
+    elsif @status.quote.present?
+      @quote = nil
+      @status.quote.destroy!
+      @quote_changed = true
+    end
+  end
+
+  def fetch_and_verify_quote!(quote, approval_uri, quote_uri)
+    embedded_quote = safe_prefetched_embed(@account, @status_parser.quoted_object, @activity_json['context'])
+    ActivityPub::VerifyQuoteService.new.call(quote, approval_uri, fetchable_quoted_uri: quote_uri, prefetched_quoted_object: embedded_quote, request_id: @request_id)
+  rescue Mastodon::UnexpectedResponseError, *Mastodon::HTTP_CONNECTION_ERRORS
+    ActivityPub::RefetchAndVerifyQuoteWorker.perform_in(rand(PROCESSING_DELAY), quote.id, quote_uri, { 'request_id' => @request_id, 'approval_uri' => approval_uri })
+  end
+
+  def update_counts!
+    likes = @status_parser.favourites_count
+    shares =  @status_parser.reblogs_count
+    return if likes.nil? && shares.nil?
+
+    @status.status_stat.tap do |status_stat|
+      status_stat.untrusted_reblogs_count = shares unless shares.nil?
+      status_stat.untrusted_favourites_count = likes unless likes.nil?
+
+      status_stat.save if status_stat.changed?
+    end
+  end
+
   def expected_type?
-    equals_or_includes_any?(@json['type'], %w(Note Question))
+    equals_or_includes_any?(@json['type'], ActivityPub::Activity::SUPPORTED_TYPES) || equals_or_includes_any?(@json['type'], ActivityPub::Activity::CONVERTED_TYPES)
   end
 
   def record_previous_edit!
@@ -282,8 +437,8 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
   end
 
   def reset_preview_card!
-    @status.preview_cards.clear
-    LinkCrawlWorker.perform_in(rand(1..59).seconds, @status.id)
+    @status.reset_preview_card!
+    LinkCrawlWorker.perform_in(rand(CRAWL_DELAY), @status.id)
   end
 
   def broadcast_updates!
@@ -297,6 +452,11 @@ class ActivityPub::ProcessStatusUpdateService < BaseService
     # expiration date, and people have voted, schedule a notification
 
     return unless poll.present? && poll.expires_at.present? && poll.votes.exists?
+
+    # If the poll had previously expired, notifications should have already been sent out (or scheduled),
+    # and re-scheduling them would cause duplicate notifications for people who had already dismissed them
+    # (see #37948)
+    return if @previous_expires_at&.past?
 
     PollExpirationNotifyWorker.remove_from_scheduled(poll.id) if @previous_expires_at.present? && @previous_expires_at > poll.expires_at
     PollExpirationNotifyWorker.perform_at(poll.expires_at + 5.minutes, poll.id)

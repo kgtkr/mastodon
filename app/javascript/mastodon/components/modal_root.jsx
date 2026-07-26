@@ -2,24 +2,31 @@ import PropTypes from 'prop-types';
 import { PureComponent } from 'react';
 
 import 'wicg-inert';
+
 import { multiply } from 'color-blend';
 import { createBrowserHistory } from 'history';
 
-export default class ModalRoot extends PureComponent {
+import { WithOptionalRouterPropTypes, withOptionalRouter } from 'mastodon/utils/react_router';
+import { IGNORE_FOCUS_ON_OPEN } from '../reducers/modal';
 
-  static contextTypes = {
-    router: PropTypes.object,
-  };
+class ModalRoot extends PureComponent {
 
   static propTypes = {
     children: PropTypes.node,
     onClose: PropTypes.func.isRequired,
-    backgroundColor: PropTypes.shape({
-      r: PropTypes.number,
-      g: PropTypes.number,
-      b: PropTypes.number,
-    }),
-    ignoreFocus: PropTypes.bool,
+    backgroundColor: PropTypes.oneOfType([
+      PropTypes.string,
+      PropTypes.shape({
+        r: PropTypes.number,
+        g: PropTypes.number,
+        b: PropTypes.number,
+      }),
+    ]),
+    ignoreFocus: PropTypes.oneOfType([
+      PropTypes.bool,
+      PropTypes.string, // 'on-open', see IGNORE_FOCUS_ON_OPEN
+    ]),
+    ...WithOptionalRouterPropTypes,
   };
 
   activeElement = this.props.children ? document.activeElement : null;
@@ -55,15 +62,7 @@ export default class ModalRoot extends PureComponent {
   componentDidMount () {
     window.addEventListener('keyup', this.handleKeyUp, false);
     window.addEventListener('keydown', this.handleKeyDown, false);
-    this.history = this.context.router ? this.context.router.history : createBrowserHistory();
-  }
-
-  UNSAFE_componentWillReceiveProps (nextProps) {
-    if (!!nextProps.children && !this.props.children) {
-      this.activeElement = document.activeElement;
-
-      this.getSiblings().forEach(sibling => sibling.setAttribute('inert', true));
-    }
+    this.history = this.props.history || createBrowserHistory();
   }
 
   componentDidUpdate (prevProps) {
@@ -82,9 +81,15 @@ export default class ModalRoot extends PureComponent {
 
       this._handleModalClose();
     }
+
     if (this.props.children && !prevProps.children) {
+      this.activeElement = document.activeElement;
+
+      this.getSiblings().forEach(sibling => sibling.setAttribute('inert', true));
+
       this._handleModalOpen();
     }
+
     if (this.props.children) {
       this._ensureHistoryBuffer();
     }
@@ -115,9 +120,13 @@ export default class ModalRoot extends PureComponent {
   }
 
   _ensureHistoryBuffer () {
-    const { pathname, state } = this.history.location;
+    const { pathname, search, hash, state } = this.history.location;
     if (!state || state.mastodonModalKey !== this._modalHistoryKey) {
-      this.history.push(pathname, { ...state, mastodonModalKey: this._modalHistoryKey });
+      this.history.push({ pathname, search, hash }, {
+        ...state,
+        focusTarget: this.props.ignoreFocus !== IGNORE_FOCUS_ON_OPEN,
+        mastodonModalKey: this._modalHistoryKey,
+      });
     }
   }
 
@@ -141,14 +150,17 @@ export default class ModalRoot extends PureComponent {
 
     let backgroundColor = null;
 
-    if (this.props.backgroundColor) {
-      backgroundColor = multiply({ ...this.props.backgroundColor, a: 1 }, { r: 0, g: 0, b: 0, a: 0.7 });
+    if (this.props.backgroundColor && typeof this.props.backgroundColor === 'string') {
+      backgroundColor = this.props.backgroundColor;
+    } else if (this.props.backgroundColor) {
+      const darkenedColor = multiply({ ...this.props.backgroundColor, a: 1 }, { r: 0, g: 0, b: 0, a: 0.7 });
+      backgroundColor = `rgb(${darkenedColor.r}, ${darkenedColor.g}, ${darkenedColor.b})`;
     }
 
     return (
       <div className='modal-root' ref={this.setRef}>
         <div style={{ pointerEvents: visible ? 'auto' : 'none' }}>
-          <div role='presentation' className='modal-root__overlay' onClick={onClose} style={{ backgroundColor: backgroundColor ? `rgba(${backgroundColor.r}, ${backgroundColor.g}, ${backgroundColor.b}, 0.7)` : null }} />
+          <div role='presentation' className='modal-root__overlay' onClick={onClose} style={{ backgroundColor }} />
           <div role='dialog' className='modal-root__container'>{children}</div>
         </div>
       </div>
@@ -156,3 +168,5 @@ export default class ModalRoot extends PureComponent {
   }
 
 }
+
+export default withOptionalRouter(ModalRoot);

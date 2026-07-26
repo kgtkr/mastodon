@@ -60,7 +60,7 @@ en-GB:
       error:
         title: An error has occurred
       new:
-        prompt_html: "%{client_name} would like permission to access your account. It is a third-party application. <strong>If you do not trust it, then you should not authorise it.</strong>"
+        prompt_html: "%{client_name} would like permission to access your account. <strong>Only approve this request if you recognise and trust this source.</strong>"
         review_permissions: Review permissions
         title: Authorisation required
       show:
@@ -95,7 +95,7 @@ en-GB:
           expired: The access token expired
           revoked: The access token was revoked
           unknown: The access token is invalid
-        resource_owner_authenticator_not_configured: Resource Owner find failed due to Doorkeeper.configure.resource_owner_authenticator being unconfiged.
+        resource_owner_authenticator_not_configured: Resource Owner find failed due to Doorkeeper.configure.resource_owner_authenticator being unconfigured.
         server_error: The authorisation server encountered an unexpected condition which prevented it from fulfilling the request.
         temporarily_unavailable: The authorisation server is currently unable to handle the request due to a temporary overloading or maintenance of the server.
         unauthorized_client: The client is not authorised to perform this request using this method.
@@ -129,12 +129,13 @@ en-GB:
         crypto: End-to-end encryption
         favourites: Favourites
         filters: Filters
-        follow: Follows, Mutes and Blocks
+        follow: Follows, Mutes, and Blocks
         follows: Follows
         lists: Lists
         media: Media attachments
         mutes: Mutes
         notifications: Notifications
+        profile: Your Mastodon profile
         push: Push notifications
         reports: Reports
         search: Search
@@ -165,6 +166,7 @@ en-GB:
       admin:write:reports: perform moderation actions on reports
       crypto: use end-to-end encryption
       follow: modify account relationships
+      profile: read only your account's profile information
       push: receive your push notifications
       read: read all your account's data
       read:accounts: see accounts information

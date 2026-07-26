@@ -27,7 +27,7 @@ export default class ImpactReport extends PureComponent {
       include_subdomains: true,
     };
 
-    api().post('/api/v1/admin/measures', {
+    api(false).post('/api/v1/admin/measures', {
       keys: ['instance_accounts', 'instance_follows', 'instance_followers'],
       start_at: null,
       end_at: null,
@@ -49,7 +49,7 @@ export default class ImpactReport extends PureComponent {
 
     return (
       <div className='dimension'>
-        <h4><FormattedMessage id='admin.impact_report.title' defaultMessage='Impact summary' /></h4>
+        <FormattedMessage id='admin.impact_report.title' defaultMessage='Impact summary' tagName="h2" />
 
         <table>
           <tbody>

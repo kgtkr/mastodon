@@ -19,7 +19,7 @@ class Api::V1::MarkersController < Api::BaseController
       @markers = {}
 
       resource_params.each_pair do |timeline, timeline_params|
-        @markers[timeline] = current_user.markers.find_or_initialize_by(timeline: timeline)
+        @markers[timeline] = current_user.markers.find_or_create_by(timeline: timeline)
         @markers[timeline].update!(timeline_params)
       end
     end
@@ -32,13 +32,7 @@ class Api::V1::MarkersController < Api::BaseController
   private
 
   def serialize_map(map)
-    serialized = {}
-
-    map.each_pair do |key, value|
-      serialized[key] = ActiveModelSerializers::SerializableResource.new(value, serializer: REST::MarkerSerializer).as_json
-    end
-
-    Oj.dump(serialized)
+    map.transform_values { |value| ActiveModelSerializers::SerializableResource.new(value, serializer: REST::MarkerSerializer) }
   end
 
   def resource_params

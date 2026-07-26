@@ -20,15 +20,14 @@ class CopyStatusStats < ActiveRecord::Migration[5.2]
   private
 
   def supports_upsert?
-    version = select_one("SELECT current_setting('server_version_num') AS v")['v'].to_i
-    version >= 90_500
+    ActiveRecord::Base.connection.database_version >= 90_500
   end
 
   def up_fast
     say 'Upsert is available, importing counters using the fast method'
 
     Status.unscoped.select('id').find_in_batches(batch_size: 5_000) do |statuses|
-      execute <<-SQL.squish
+      execute <<~SQL.squish
         INSERT INTO status_stats (status_id, reblogs_count, favourites_count, created_at, updated_at)
         SELECT id, reblogs_count, favourites_count, created_at, updated_at
         FROM statuses

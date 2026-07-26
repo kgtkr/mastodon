@@ -2,13 +2,13 @@
 
 require 'rails_helper'
 
-describe ResolveURLService, type: :service do
+RSpec.describe ResolveURLService do
   subject { described_class.new }
 
   describe '#call' do
     it 'returns nil when there is no resource url' do
-      url           = 'http://example.com/missing-resource'
-      known_account = Fabricate(:account, uri: url, domain: 'example.com')
+      url = 'http://example.com/missing-resource'
+      Fabricate(:account, uri: url, domain: 'example.com')
       service = instance_double(FetchResourceService)
 
       allow(FetchResourceService).to receive(:new).and_return service
@@ -28,6 +28,49 @@ describe ResolveURLService, type: :service do
       allow(service).to receive(:call).with(url).and_return(nil)
 
       expect(subject.call(url)).to eq known_account
+    end
+
+    context 'when searching for a remote collection' do
+      let(:account) { Fabricate(:account) }
+      let(:collection_account) { Fabricate(:account, domain: 'example.com', protocol: :activitypub) }
+
+      let(:uri) { 'https://example.com/featured_collections/1' }
+
+      let(:payload) do
+        {
+          '@context' => 'https://www.w3.org/ns/activitystreams',
+          'id' => uri,
+          'type' => 'FeaturedCollection',
+          'name' => 'Incredible people',
+          'summary' => 'These are really amazing',
+          'attributedTo' => collection_account.uri,
+          'sensitive' => false,
+          'discoverable' => true,
+          'totalItems' => 0,
+        }
+      end
+
+      before do
+        stub_request(:get, uri).to_return(status: 200, body: payload.to_json, headers: { 'Content-Type': 'application/activity+json' })
+      end
+
+      it 'returns the collection' do
+        expect(subject.call(uri, on_behalf_of: account))
+          .to be_a(Collection)
+          .and have_attributes(
+            uri: uri
+          )
+      end
+    end
+
+    context 'when searching for a local collection' do
+      let(:account) { Fabricate(:account) }
+      let(:collection) { Fabricate(:collection) }
+
+      it 'returns the collection' do
+        expect(subject.call(ActivityPub::TagManager.instance.uri_for(collection), on_behalf_of: account))
+          .to eq(collection)
+      end
     end
 
     context 'when searching for a remote private status' do
@@ -51,12 +94,11 @@ describe ResolveURLService, type: :service do
           let(:url) { 'https://example.com/@foo/42' }
           let(:uri) { 'https://example.com/users/foo/statuses/42' }
 
-          it 'returns status by url' do
-            expect(subject.call(url, on_behalf_of: account)).to eq(status)
-          end
-
-          it 'returns status by uri' do
-            expect(subject.call(uri, on_behalf_of: account)).to eq(status)
+          it 'returns status by URL or URI' do
+            expect(subject.call(url, on_behalf_of: account))
+              .to eq(status)
+            expect(subject.call(uri, on_behalf_of: account))
+              .to eq(status)
           end
         end
 
@@ -75,12 +117,11 @@ describe ResolveURLService, type: :service do
           let(:url) { 'https://example.com/@foo/42' }
           let(:uri) { 'https://example.com/users/foo/statuses/42' }
 
-          it 'does not return the status by url' do
-            expect(subject.call(url, on_behalf_of: account)).to be_nil
-          end
-
-          it 'does not return the status by uri' do
-            expect(subject.call(uri, on_behalf_of: account)).to be_nil
+          it 'does not return the status by URL or URI' do
+            expect(subject.call(url, on_behalf_of: account))
+              .to be_nil
+            expect(subject.call(uri, on_behalf_of: account))
+              .to be_nil
           end
         end
 
@@ -107,22 +148,20 @@ describe ResolveURLService, type: :service do
           account.follow!(poster)
         end
 
-        it 'returns status by url' do
-          expect(subject.call(url, on_behalf_of: account)).to eq(status)
-        end
-
-        it 'returns status by uri' do
-          expect(subject.call(uri, on_behalf_of: account)).to eq(status)
+        it 'returns status by URL or URI' do
+          expect(subject.call(url, on_behalf_of: account))
+            .to eq(status)
+          expect(subject.call(uri, on_behalf_of: account))
+            .to eq(status)
         end
       end
 
       context 'when the account does not follow the poster' do
-        it 'does not return the status by url' do
-          expect(subject.call(url, on_behalf_of: account)).to be_nil
-        end
-
-        it 'does not return the status by uri' do
-          expect(subject.call(uri, on_behalf_of: account)).to be_nil
+        it 'does not return the status by URL or URI' do
+          expect(subject.call(url, on_behalf_of: account))
+            .to be_nil
+          expect(subject.call(uri, on_behalf_of: account))
+            .to be_nil
         end
       end
     end
@@ -139,6 +178,7 @@ describe ResolveURLService, type: :service do
         stub_request(:get, url).to_return(status: 302, headers: { 'Location' => status_url })
         body = ActiveModelSerializers::SerializableResource.new(status, serializer: ActivityPub::NoteSerializer, adapter: ActivityPub::Adapter).to_json
         stub_request(:get, status_url).to_return(body: body, headers: { 'Content-Type' => 'application/activity+json' })
+        stub_request(:get, uri).to_return(body: body, headers: { 'Content-Type' => 'application/activity+json' })
       end
 
       it 'returns status by url' do

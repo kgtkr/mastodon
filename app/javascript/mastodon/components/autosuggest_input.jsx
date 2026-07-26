@@ -5,10 +5,13 @@ import classNames from 'classnames';
 import ImmutablePropTypes from 'react-immutable-proptypes';
 import ImmutablePureComponent from 'react-immutable-pure-component';
 
+import Overlay from 'react-overlays/Overlay';
+
 import AutosuggestAccountContainer from '../features/compose/containers/autosuggest_account_container';
 
-import AutosuggestEmoji from './autosuggest_emoji';
+import { AutosuggestEmoji } from './autosuggest_emoji';
 import { AutosuggestHashtag } from './autosuggest_hashtag';
+import { LocalCustomEmojiProvider } from './emoji/context';
 
 const textAtCursorMatchesToken = (str, caretPosition, searchTokens) => {
   let word;
@@ -26,7 +29,7 @@ const textAtCursorMatchesToken = (str, caretPosition, searchTokens) => {
     return [null, null];
   }
 
-  word = word.trim().toLowerCase();
+  word = word.trim();
 
   if (word.length > 0) {
     return [left + 1, word];
@@ -59,7 +62,7 @@ export default class AutosuggestInput extends ImmutablePureComponent {
 
   static defaultProps = {
     autoFocus: true,
-    searchTokens: ['@', ':', '#'],
+    searchTokens: ['@', '＠', ':', '#', '＃'],
   };
 
   state = {
@@ -157,8 +160,8 @@ export default class AutosuggestInput extends ImmutablePureComponent {
     this.input.focus();
   };
 
-  UNSAFE_componentWillReceiveProps (nextProps) {
-    if (nextProps.suggestions !== this.props.suggestions && nextProps.suggestions.size > 0 && this.state.suggestionsHidden && this.state.focused) {
+  componentDidUpdate (prevProps) {
+    if (prevProps.suggestions !== this.props.suggestions && this.props.suggestions.size > 0 && this.state.suggestionsHidden && this.state.focused) {
       this.setState({ suggestionsHidden: false });
     }
   }
@@ -195,34 +198,39 @@ export default class AutosuggestInput extends ImmutablePureComponent {
 
     return (
       <div className='autosuggest-input'>
-        <label>
-          <span style={{ display: 'none' }}>{placeholder}</span>
+        <input
+          type='text'
+          ref={this.setInput}
+          disabled={disabled}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          value={value}
+          onChange={this.onChange}
+          onKeyDown={this.onKeyDown}
+          onKeyUp={onKeyUp}
+          onFocus={this.onFocus}
+          onBlur={this.onBlur}
+          dir='auto'
+          aria-autocomplete='list'
+          aria-label={placeholder}
+          id={id}
+          className={className}
+          maxLength={maxLength}
+          lang={lang}
+          spellCheck={spellCheck}
+        />
 
-          <input
-            type='text'
-            ref={this.setInput}
-            disabled={disabled}
-            placeholder={placeholder}
-            autoFocus={autoFocus}
-            value={value}
-            onChange={this.onChange}
-            onKeyDown={this.onKeyDown}
-            onKeyUp={onKeyUp}
-            onFocus={this.onFocus}
-            onBlur={this.onBlur}
-            dir='auto'
-            aria-autocomplete='list'
-            id={id}
-            className={className}
-            maxLength={maxLength}
-            lang={lang}
-            spellCheck={spellCheck}
-          />
-        </label>
-
-        <div className={`autosuggest-textarea__suggestions ${suggestionsHidden || suggestions.isEmpty() ? '' : 'autosuggest-textarea__suggestions--visible'}`}>
-          {suggestions.map(this.renderSuggestion)}
-        </div>
+        <LocalCustomEmojiProvider>
+          <Overlay show={!(suggestionsHidden || suggestions.isEmpty())} offset={[0, 0]} placement='bottom' target={this.input} popperConfig={{ strategy: 'fixed' }}>
+            {({ props }) => (
+              <div {...props}>
+                <div className='autosuggest-textarea__suggestions' style={{ width: this.input?.clientWidth }}>
+                  {suggestions.map(this.renderSuggestion)}
+                </div>
+              </div>
+            )}
+          </Overlay>
+        </LocalCustomEmojiProvider>
       </div>
     );
   }

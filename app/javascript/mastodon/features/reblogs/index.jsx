@@ -1,8 +1,8 @@
 import PropTypes from 'prop-types';
 
-import { defineMessages, injectIntl, FormattedMessage } from 'react-intl';
+import { defineMessages, FormattedMessage } from 'react-intl';
 
-import { Helmet } from 'react-helmet';
+import { Helmet } from '@unhead/react/helmet';
 
 import ImmutablePropTypes from 'react-immutable-proptypes';
 import ImmutablePureComponent from 'react-immutable-pure-component';
@@ -10,13 +10,15 @@ import { connect } from 'react-redux';
 
 import { debounce } from 'lodash';
 
+import RefreshIcon from '@/material-icons/400-24px/refresh.svg?react';
+import { Account } from 'mastodon/components/account';
 import { Icon }  from 'mastodon/components/icon';
+import { injectIntl } from '@/mastodon/components/intl';
 
 import { fetchReblogs, expandReblogs } from '../../actions/interactions';
 import ColumnHeader from '../../components/column_header';
 import { LoadingIndicator } from '../../components/loading_indicator';
 import ScrollableList from '../../components/scrollable_list';
-import AccountContainer from '../../containers/account_container';
 import Column from '../ui/components/column';
 
 const messages = defineMessages({
@@ -41,11 +43,11 @@ class Reblogs extends ImmutablePureComponent {
     intl: PropTypes.object.isRequired,
   };
 
-  UNSAFE_componentWillMount () {
+  componentDidMount () {
     if (!this.props.accountIds) {
       this.props.dispatch(fetchReblogs(this.props.params.statusId));
     }
-  };
+  }
 
   handleRefresh = () => {
     this.props.dispatch(fetchReblogs(this.props.params.statusId));
@@ -74,7 +76,7 @@ class Reblogs extends ImmutablePureComponent {
           showBackButton
           multiColumn={multiColumn}
           extraButton={(
-            <button type='button' className='column-header__button' title={intl.formatMessage(messages.refresh)} aria-label={intl.formatMessage(messages.refresh)} onClick={this.handleRefresh}><Icon id='refresh' /></button>
+            <button type='button' className='column-header__button' title={intl.formatMessage(messages.refresh)} aria-label={intl.formatMessage(messages.refresh)} onClick={this.handleRefresh}><Icon id='refresh' icon={RefreshIcon} /></button>
           )}
         />
 
@@ -87,7 +89,7 @@ class Reblogs extends ImmutablePureComponent {
           bindToDocument={!multiColumn}
         >
           {accountIds.map(id =>
-            <AccountContainer key={id} id={id} withNote={false} />,
+            <Account key={id} id={id} />,
           )}
         </ScrollableList>
 
