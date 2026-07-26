@@ -16,8 +16,11 @@ git merge $(git merge-base main v$VERSION) # コンフリクト発生の可能�
 git push origin kgtkr-master
 
 
-git checkout kgtkr-$MINOR_VERSION || git checkout -b kgtkr-$MINOR_VERSION
-git pull origin kgtkr-$MINOR_VERSION
+if git checkout kgtkr-$MINOR_VERSION; then
+  git pull
+else
+  git checkout -b kgtkr-$MINOR_VERSION
+fi
 
 # kgtkr-$MINOR_VERSION のアップデート
 git merge kgtkr-master
