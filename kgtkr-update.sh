@@ -39,20 +39,12 @@ update_master() {
   git push --tags || true
 
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  if [[ "$CURRENT_BRANCH" != update/* ]]; then
+  if [[ "$CURRENT_BRANCH" != kgtkr/update/* ]]; then
     git checkout kgtkr-master
     git merge --ff-only origin/kgtkr-master || true
   fi
 
-  UPSTREAM_BASE="main"
-  if git rev-parse --verify origin/main &>/dev/null; then
-    UPSTREAM_BASE="origin/main"
-  elif git rev-parse --verify upstream/main &>/dev/null; then
-    UPSTREAM_BASE="upstream/main"
-  fi
-
-  MERGE_BASE=$(git merge-base "$UPSTREAM_BASE" "v$VERSION")
-  git merge "$MERGE_BASE" --no-edit || true
+  git merge "v$VERSION" --no-edit || true
 }
 
 update_release() {

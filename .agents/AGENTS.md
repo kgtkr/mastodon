@@ -37,7 +37,7 @@
 
 | サブコマンド | コマンド例 | 処理内容 |
 | :--- | :--- | :--- |
-| `master` | `./kgtkr-update.sh master 4.6.3` | `kgtkr-master` (または作業ブランチ) に `merge-base main vX.Y.Z` をマージ。 |
+| `master` | `./kgtkr-update.sh master 4.6.3` | `kgtkr-master` (または作業ブランチ) に `vX.Y.Z` をマージ。 |
 | `release` | `./kgtkr-update.sh release 4.6.3` | `kgtkr-$MINOR_VERSION` に `kgtkr-master` と `vX.Y.Z` をマージし、`mstdn.kgtkr.net` を `kgtkr-$MINOR_VERSION` へ強制リセット。 |
 | `all` (既定) | `./kgtkr-update.sh 4.6.3` | `master` と `release` を連続実行（従来の手動一括更新動作）。 |
 
