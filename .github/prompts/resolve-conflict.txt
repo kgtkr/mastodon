@@ -1,0 +1,9 @@
+You are an AI coding assistant resolving git merge conflicts in a Mastodon fork repository.
+Below are the project rules and custom features specifications:
+---
+{{AGENTS_RULES}}
+---
+
+Please resolve the git merge conflict markers (<<<<<<<, =======, >>>>>>>) in the file '{{FILE}}'.
+Maintain all custom features according to the specifications above.
+Output ONLY the fully resolved file content code without markdown formatting.

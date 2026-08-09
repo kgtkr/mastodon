@@ -20,17 +20,26 @@
 
 ## 2. バージョンアップデート手順
 
-本家の新しい安定版リリース（`vX.Y.Z`）を追従する際は、`kgtkr-update.sh` スクリプトを使用します。
+本家の新しい安定版リリース（`vX.Y.Z`）を追従する際は、`kgtkr-update.sh` スクリプトまたは GitHub Actions の自動アップデートワークフローを使用します。
 
-このスクリプトは以下のステップを自動で処理します。
+### ① GitHub Actions による自動アップデート（推奨フロー）
+* **定期チェック (`kgtkr-auto-update-check.yml`)**:
+  * 毎日定期実行（または手動実行）され、`upstream` の最新安定版タグをチェックします。
+  * 未適用のアップデートがあれば、`update/vX.Y.Z` ブランチを作成し `./kgtkr-update.sh master <VERSION>` を実行します。
+  * コンフリクトが発生した場合、`google-github-actions/run-gemini-cli` (Gemini CLI) がこの `AGENTS.md` の独自仕様ルールに基づき自動解消します。
+  * コンフリクト解消後、`kgtkr-master` に向けた **Pull Request** が自動作成され、人間にレビューが依頼されます。
+* **リリース・デプロイ (`kgtkr-auto-update-release.yml`)**:
+  * 人間が PR をレビューしてマージすると発火し、`./kgtkr-update.sh release <VERSION>` を実行します。
+  * `kgtkr-$MINOR_VERSION` および `mstdn.kgtkr.net` が更新（`PAT` により push）され、後続の Docker イメージ構築（`kgtkr-build-image.yml`）が自動でトリガーされます。
 
-1. **`kgtkr-master` のアップデート**
-   * 本家 `main` と `vX.Y.Z` の共通祖先（`merge-base`）を `kgtkr-master` にマージします。これにより独自パッチを最新ベースに追従させます。
-2. **`kgtkr-X.Y` のアップデート**
-   * `kgtkr-X.Y` ブランチをチェックアウト（無ければ作成）し、そこへ `kgtkr-master` と本家タグ `vX.Y.Z` をそれぞれマージします。
-   * ※ コンフリクトが発生した場合は、この段階で手動で解決しコミットする必要があります。
-3. **`mstdn.kgtkr.net` の更新**
-   * `mstdn.kgtkr.net` に切り替え、`kgtkr-X.Y` へ強制リセット（`git reset --hard`）して強制プッシュします。
+### ② `kgtkr-update.sh` のサブコマンド仕様
+手動でアップデートを実行する場合、またはCIから部分的に呼ぶ場合はサブコマンドを使用します。
+
+| サブコマンド | コマンド例 | 処理内容 |
+| :--- | :--- | :--- |
+| `master` | `./kgtkr-update.sh master 4.6.3` | `kgtkr-master` (または作業ブランチ) に `merge-base main vX.Y.Z` をマージ。 |
+| `release` | `./kgtkr-update.sh release 4.6.3` | `kgtkr-$MINOR_VERSION` に `kgtkr-master` と `vX.Y.Z` をマージし、`mstdn.kgtkr.net` を `kgtkr-$MINOR_VERSION` へ強制リセット。 |
+| `all` (既定) | `./kgtkr-update.sh 4.6.3` | `master` と `release` を連続実行（従来の手動一括更新動作）。 |
 
 ---
 

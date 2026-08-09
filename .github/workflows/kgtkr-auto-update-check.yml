@@ -1,0 +1,105 @@
+name: kgtkr-auto-update-check
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: 'Mastodon version'
+        required: false
+
+jobs:
+  check-and-create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT }}
+
+      - run: |
+          git config --global user.name "kgtkr actions"
+          git config --global user.email "actions@kgtkr.net"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: google-github-actions/run-gemini-cli@v0
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+
+      - id: detect
+        run: |
+          git remote add upstream https://github.com/mastodon/mastodon.git 2>/dev/null || true
+          git fetch upstream --tags
+
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TARGET_VERSION="${{ github.event.inputs.version }}"
+          else
+            TARGET_TAG=$(git tag -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+            TARGET_VERSION="${TARGET_TAG#v}"
+          fi
+
+          echo "version=$TARGET_VERSION" >> $GITHUB_OUTPUT
+
+          if git ls-remote --exit-code --heads origin "update/v$TARGET_VERSION" >/dev/null 2>&1; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          TAG_MERGE_BASE=$(git merge-base origin/main "v$TARGET_VERSION" 2>/dev/null || true)
+          if [ -n "$TAG_MERGE_BASE" ] && git merge-base --is-ancestor "$TAG_MERGE_BASE" kgtkr-master 2>/dev/null; then
+            if git merge-base --is-ancestor "v$TARGET_VERSION" kgtkr-master 2>/dev/null; then
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - if: steps.detect.outputs.skip != 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          BRANCH_NAME="update/v$VERSION"
+
+          git checkout -b "$BRANCH_NAME" origin/kgtkr-master
+          ./kgtkr-update.sh master "$VERSION"
+
+          CONFLICT_FILES=$(git diff --name-only --diff-filter=U || true)
+          if [ -n "$CONFLICT_FILES" ]; then
+            AGENTS_RULES=""
+            [ -f ".agents/AGENTS.md" ] && AGENTS_RULES=$(cat .agents/AGENTS.md)
+            PROMPT_TEMPLATE=$(cat .github/prompts/resolve-conflict.txt)
+
+            for file in $CONFLICT_FILES; do
+              PROMPT="${PROMPT_TEMPLATE//\{\{AGENTS_RULES\}\}/$AGENTS_RULES}"
+              PROMPT="${PROMPT//\{\{FILE\}\}/$file}"
+
+              gemini prompt "$PROMPT" --file "$file" > "$file.tmp"
+              if [ -s "$file.tmp" ]; then
+                mv "$file.tmp" "$file"
+                git add "$file"
+              fi
+            done
+            GIT_MERGE_AUTOEDIT=no git commit --no-edit || true
+          fi
+
+          git push origin "$BRANCH_NAME"
+
+      - if: steps.detect.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          BRANCH_NAME="update/v$VERSION"
+
+          gh pr create \
+            --title "Update to Mastodon v$VERSION" \
+            --body "Automated update to Mastodon v$VERSION." \
+            --base kgtkr-master \
+            --head "$BRANCH_NAME"
