@@ -8,7 +8,7 @@ on:
 
 jobs:
   release:
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'update/v')
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'kgtkr/update/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
 
       - run: |
           HEAD_REF="${{ github.event.pull_request.head.ref }}"
-          VERSION="${HEAD_REF#update/v}"
+          VERSION="${HEAD_REF#kgtkr/update/v}"
 
           ./kgtkr-update.sh release "$VERSION"
 

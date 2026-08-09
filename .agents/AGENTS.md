@@ -25,7 +25,7 @@
 ### ① GitHub Actions による自動アップデート（推奨フロー）
 * **定期チェック (`kgtkr-auto-update-check.yml`)**:
   * 毎日定期実行（または手動実行）され、`upstream` の最新安定版タグをチェックします。
-  * 未適用のアップデートがあれば、`update/vX.Y.Z` ブランチを作成し `./kgtkr-update.sh master <VERSION>` を実行します。
+  * 未適用のアップデートがあれば、`kgtkr/update/vX.Y.Z` ブランチを作成し `./kgtkr-update.sh master <VERSION>` を実行します。
   * コンフリクトが発生した場合、`google-github-actions/run-gemini-cli` (Gemini CLI) がこの `AGENTS.md` の独自仕様ルールに基づき自動解消します。
   * コンフリクト解消後、`kgtkr-master` に向けた **Pull Request** が自動作成され、人間にレビューが依頼されます。
 * **リリース・デプロイ (`kgtkr-auto-update-release.yml`)**:

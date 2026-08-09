@@ -46,7 +46,7 @@ jobs:
 
           echo "version=$TARGET_VERSION" >> $GITHUB_OUTPUT
 
-          if git ls-remote --exit-code --heads origin "update/v$TARGET_VERSION" >/dev/null 2>&1; then
+          if git ls-remote --exit-code --heads origin "kgtkr/update/v$TARGET_VERSION" >/dev/null 2>&1; then
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -67,7 +67,7 @@ jobs:
           GEMINI_CLI_TRUST_WORKSPACE: "true"
         run: |
           VERSION="${{ steps.detect.outputs.version }}"
-          BRANCH_NAME="update/v$VERSION"
+          BRANCH_NAME="kgtkr/update/v$VERSION"
 
           git checkout -b "$BRANCH_NAME" origin/kgtkr-master
           ./kgtkr-update.sh master "$VERSION"
@@ -98,7 +98,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
           VERSION="${{ steps.detect.outputs.version }}"
-          BRANCH_NAME="update/v$VERSION"
+          BRANCH_NAME="kgtkr/update/v$VERSION"
 
           gh pr create \
             --repo ${{ github.repository }} \
