@@ -4,14 +4,16 @@
 #
 # Table name: user_roles
 #
-#  id          :bigint(8)        not null, primary key
-#  name        :string           default(""), not null
-#  color       :string           default(""), not null
-#  position    :integer          default(0), not null
-#  permissions :bigint(8)        default(0), not null
-#  highlighted :boolean          default(FALSE), not null
-#  created_at  :datetime         not null
-#  updated_at  :datetime         not null
+#  id               :bigint(8)        not null, primary key
+#  collection_limit :integer          default(10), not null
+#  color            :string           default(""), not null
+#  highlighted      :boolean          default(FALSE), not null
+#  name             :string           default(""), not null
+#  permissions      :bigint(8)        default(0), not null
+#  position         :integer          default(0), not null
+#  require_2fa      :boolean          default(FALSE), not null
+#  created_at       :datetime         not null
+#  updated_at       :datetime         not null
 #
 
 class UserRole < ApplicationRecord
@@ -36,20 +38,35 @@ class UserRole < ApplicationRecord
     manage_roles: (1 << 17),
     manage_user_access: (1 << 18),
     delete_user_data: (1 << 19),
+    view_feeds: (1 << 20),
+    invite_bypass_approval: (1 << 21),
+    manage_email_subscriptions: (1 << 22),
   }.freeze
+
+  EVERYONE_ROLE_ID = -99
+  NOBODY_POSITION = -1
+
+  POSITION_LIMIT = (2**31) - 1
+  CSS_COLORS = /\A#?(?:[A-F0-9]{3}){1,2}\z/i # CSS-style hex colors
 
   module Flags
     NONE = 0
     ALL  = FLAGS.values.reduce(&:|)
 
     DEFAULT = FLAGS[:invite_users]
+    SAFE = FLAGS[:invite_users] | FLAGS[:invite_bypass_approval]
 
     CATEGORIES = {
       invites: %i(
         invite_users
+        invite_bypass_approval
       ).freeze,
 
-      moderation: %w(
+      email: %i(
+        manage_email_subscriptions
+      ).freeze,
+
+      moderation: %i(
         view_dashboard
         view_audit_log
         manage_users
@@ -61,9 +78,10 @@ class UserRole < ApplicationRecord
         manage_blocks
         manage_taxonomies
         manage_invites
+        view_feeds
       ).freeze,
 
-      administration: %w(
+      administration: %i(
         manage_settings
         manage_rules
         manage_roles
@@ -72,7 +90,7 @@ class UserRole < ApplicationRecord
         manage_announcements
       ).freeze,
 
-      devops: %w(
+      devops: %i(
         view_devops
       ).freeze,
 
@@ -85,7 +103,9 @@ class UserRole < ApplicationRecord
   attr_writer :current_account
 
   validates :name, presence: true, unless: :everyone?
-  validates :color, format: { with: /\A#?(?:[A-F0-9]{3}){1,2}\z/i }, unless: -> { color.blank? }
+  validates :color, format: { with: CSS_COLORS }, if: :color?
+  validates :position, numericality: { in: (-POSITION_LIMIT..POSITION_LIMIT) }
+  validates :collection_limit, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
 
   validate :validate_permissions_elevation
   validate :validate_position_elevation
@@ -94,18 +114,18 @@ class UserRole < ApplicationRecord
 
   before_validation :set_position
 
-  scope :assignable, -> { where.not(id: -99).order(position: :asc) }
+  scope :assignable, -> { where.not(id: EVERYONE_ROLE_ID).order(position: :asc) }
 
   has_many :users, inverse_of: :role, foreign_key: 'role_id', dependent: :nullify
 
   def self.nobody
-    @nobody ||= UserRole.new(permissions: Flags::NONE, position: -1)
+    @nobody ||= UserRole.new(permissions: Flags::NONE, position: NOBODY_POSITION)
   end
 
   def self.everyone
-    UserRole.find(-99)
+    UserRole.find(EVERYONE_ROLE_ID)
   rescue ActiveRecord::RecordNotFound
-    UserRole.create!(id: -99, permissions: Flags::DEFAULT)
+    UserRole.create!(id: EVERYONE_ROLE_ID, permissions: Flags::DEFAULT)
   end
 
   def self.that_can(*any_of_privileges)
@@ -113,7 +133,7 @@ class UserRole < ApplicationRecord
   end
 
   def everyone?
-    id == -99
+    id == EVERYONE_ROLE_ID
   end
 
   def nobody?
@@ -136,6 +156,10 @@ class UserRole < ApplicationRecord
     other_role.nil? || position > other_role.position
   end
 
+  def bypass_block?(role)
+    overrides?(role) && highlighted? && can?(*Flags::CATEGORIES[:moderation])
+  end
+
   def computed_permissions
     # If called on the everyone role, no further computation needed
     return permissions if everyone?
@@ -147,7 +171,7 @@ class UserRole < ApplicationRecord
     @computed_permissions ||= begin
       permissions = self.class.everyone.permissions | self.permissions
 
-      if permissions & FLAGS[:administrator] == FLAGS[:administrator]
+      if administrator?
         Flags::ALL
       else
         permissions
@@ -159,6 +183,10 @@ class UserRole < ApplicationRecord
     name
   end
 
+  def administrator?
+    permissions & FLAGS[:administrator] == FLAGS[:administrator]
+  end
+
   private
 
   def in_permissions?(privilege)
@@ -168,7 +196,7 @@ class UserRole < ApplicationRecord
   end
 
   def set_position
-    self.position = -1 if everyone?
+    self.position = NOBODY_POSITION if everyone?
   end
 
   def validate_own_role_edition
@@ -176,6 +204,7 @@ class UserRole < ApplicationRecord
 
     errors.add(:permissions_as_keys, :own_role) if permissions_changed?
     errors.add(:position, :own_role) if position_changed?
+    errors.add(:require_2fa, :own_role) if require_2fa_changed? && !administrator?
   end
 
   def validate_permissions_elevation
@@ -187,6 +216,6 @@ class UserRole < ApplicationRecord
   end
 
   def validate_dangerous_permissions
-    errors.add(:permissions_as_keys, :dangerous) if everyone? && Flags::DEFAULT & permissions != permissions
+    errors.add(:permissions_as_keys, :dangerous) if everyone? && Flags::SAFE & permissions != permissions
   end
 end

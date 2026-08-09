@@ -9,6 +9,7 @@ namespace :settings do
 
   namespace :preferences do
     resource :appearance, only: [:show, :update], controller: :appearance
+    resource :posting_defaults, only: [:show, :update]
     resource :notifications, only: [:show, :update]
     resource :other, only: [:show, :update], controller: :other
   end
@@ -26,9 +27,10 @@ namespace :settings do
     resources :follows, only: :index, controller: :following_accounts
     resources :blocks, only: :index, controller: :blocked_accounts
     resources :mutes, only: :index, controller: :muted_accounts
-    resources :lists, only: :index, controller: :lists
+    resources :lists, only: :index
     resources :domain_blocks, only: :index, controller: :blocked_domains
-    resources :bookmarks, only: :index, controller: :bookmarks
+    resources :bookmarks, only: :index
+    resources :custom_filters, only: :index, constraints: { format: :json }, controller: :custom_filters
   end
 
   resources :two_factor_authentication_methods, only: [:index] do
@@ -37,13 +39,13 @@ namespace :settings do
     end
   end
 
-  resource :otp_authentication, only: [:show, :create], controller: 'two_factor_authentication/otp_authentication'
+  scope module: :two_factor_authentication do
+    resource :otp_authentication, only: [:show, :create], controller: :otp_authentication
 
-  resources :webauthn_credentials, only: [:index, :new, :create, :destroy],
-                                   path: 'security_keys',
-                                   controller: 'two_factor_authentication/webauthn_credentials' do
-    collection do
-      get :options
+    resources :webauthn_credentials, only: [:index, :new, :create, :destroy], path: 'security_keys' do
+      collection do
+        get :options
+      end
     end
   end
 
@@ -60,7 +62,7 @@ namespace :settings do
 
   resource :delete, only: [:show, :destroy]
   resource :migration, only: [:show, :create]
-  resource :verification, only: :show
+  resource :verification, only: [:show, :update]
   resource :privacy, only: [:show, :update], controller: 'privacy'
 
   namespace :migration do

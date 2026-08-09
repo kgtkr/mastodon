@@ -2,21 +2,21 @@
 
 require 'resolv'
 
-class EmailMxValidator < ActiveModel::Validator
-  def validate(user)
-    return if user.email.blank?
+class EmailMxValidator < ActiveModel::EachValidator
+  def validate_each(record, attribute, value)
+    return if value.blank?
 
-    domain = get_domain(user.email)
+    domain = get_domain(value)
 
     if domain.blank? || domain.include?('..')
-      user.errors.add(:email, :invalid)
+      record.errors.add(attribute, :invalid)
     elsif !on_allowlist?(domain)
       resolved_ips, resolved_domains = resolve_mx(domain)
 
       if resolved_ips.empty?
-        user.errors.add(:email, :unreachable)
-      elsif on_blacklist?(resolved_domains, user.sign_up_ip)
-        user.errors.add(:email, :blocked)
+        record.errors.add(attribute, :unreachable)
+      elsif email_domain_blocked?([domain, *resolved_domains], options[:attempt_ip].is_a?(Symbol) ? record.public_send(options[:attempt_ip]) : nil)
+        record.errors.add(attribute, :blocked)
       end
     end
   end
@@ -34,9 +34,9 @@ class EmailMxValidator < ActiveModel::Validator
   end
 
   def on_allowlist?(domain)
-    return false if Rails.configuration.x.email_domains_whitelist.blank?
+    return false if Rails.configuration.x.email_domains_allowlist.blank?
 
-    Rails.configuration.x.email_domains_whitelist.include?(domain)
+    Rails.configuration.x.email_domains_allowlist.include?(domain)
   end
 
   def resolve_mx(domain)
@@ -47,6 +47,7 @@ class EmailMxValidator < ActiveModel::Validator
       dns.timeouts = 5
 
       records = dns.getresources(domain, Resolv::DNS::Resource::IN::MX).to_a.map { |e| e.exchange.to_s }
+      next if records == [''] # This domain explicitly rejects emails
 
       ([domain] + records).uniq.each do |hostname|
         ips.concat(dns.getresources(hostname, Resolv::DNS::Resource::IN::A).to_a.map { |e| e.address.to_s })
@@ -57,7 +58,7 @@ class EmailMxValidator < ActiveModel::Validator
     [ips, records]
   end
 
-  def on_blacklist?(domains, attempt_ip)
+  def email_domain_blocked?(domains, attempt_ip)
     EmailDomainBlock.block?(domains, attempt_ip: attempt_ip)
   end
 end

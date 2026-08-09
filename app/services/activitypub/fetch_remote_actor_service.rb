@@ -3,24 +3,23 @@
 class ActivityPub::FetchRemoteActorService < BaseService
   include JsonLdHelper
   include DomainControlHelper
-  include WebfingerHelper
 
   class Error < StandardError; end
 
   SUPPORTED_TYPES = %w(Application Group Organization Person Service).freeze
 
   # Does a WebFinger roundtrip on each call, unless `only_key` is true
-  def call(uri, id: true, prefetched_body: nil, break_on_redirect: false, only_key: false, suppress_errors: true, request_id: nil)
+  def call(uri, prefetched_body: nil, break_on_redirect: false, only_key: false, suppress_errors: true, request_id: nil)
     return if domain_not_allowed?(uri)
     return ActivityPub::TagManager.instance.uri_to_actor(uri) if ActivityPub::TagManager.instance.local_uri?(uri)
 
     @json = begin
       if prefetched_body.nil?
-        fetch_resource(uri, id)
+        fetch_resource(uri, true)
       else
-        body_to_json(prefetched_body, compare_id: id ? uri : nil)
+        body_to_json(prefetched_body, compare_id: uri)
       end
-    rescue Oj::ParseError
+    rescue JSON::ParserError
       raise Error, "Error parsing JSON-LD document #{uri}"
     end
 
@@ -28,11 +27,21 @@ class ActivityPub::FetchRemoteActorService < BaseService
     raise Error, "Unsupported JSON-LD context for document #{uri}" unless supported_context?
     raise Error, "Unexpected object type for actor #{uri} (expected any of: #{SUPPORTED_TYPES})" unless expected_type?
     raise Error, "Actor #{uri} has moved to #{@json['movedTo']}" if break_on_redirect && @json['movedTo'].present?
-    raise Error, "Actor #{uri} has no 'preferredUsername', which is a requirement for Mastodon compatibility" if @json['preferredUsername'].blank?
+    raise Error, "Actor #{uri} has neither 'preferredUsername' nor `webfinger`, which is a requirement for Mastodon compatibility" if @json['preferredUsername'].blank? && @json['webfinger'].blank?
 
-    @uri      = @json['id']
-    @username = @json['preferredUsername']
-    @domain   = Addressable::URI.parse(@uri).normalized_host
+    @uri = @json['id']
+
+    # FEP-2c59 defines a `webfinger` attribute that makes things more explicit and spares an extra request in some cases.
+    # It supersedes `preferredUsername`.
+    @username, @domain = split_acct(@json['webfinger']) if @json['webfinger'].present? && @json['webfinger'].is_a?(String)
+
+    if @username.blank? || @domain.blank?
+      raise "Actor #{uri} has no `preferredUsername`, and either a bogus or missing `webfinger`, which is a requirement for Mastodon compatibility" if @json['preferredUsername'].blank?
+
+      Rails.logger.debug { "Actor #{uri} has an invalid `webfinger` value, falling back to `preferredUsername`" } if @json['webfinger'].present?
+      @username = @json['preferredUsername']
+      @domain   = Addressable::URI.parse(@uri).normalized_host
+    end
 
     check_webfinger! unless only_key
 
@@ -45,21 +54,20 @@ class ActivityPub::FetchRemoteActorService < BaseService
   private
 
   def check_webfinger!
-    webfinger                            = webfinger!("acct:#{@username}@#{@domain}")
+    webfinger = Webfinger.new("acct:#{@username}@#{@domain}").perform
     confirmed_username, confirmed_domain = split_acct(webfinger.subject)
 
     if @username.casecmp(confirmed_username).zero? && @domain.casecmp(confirmed_domain).zero?
-      raise Error, "Webfinger response for #{@username}@#{@domain} does not loop back to #{@uri}" if webfinger.link('self', 'href') != @uri
+      raise Error, "Webfinger response for #{@username}@#{@domain} does not loop back to #{@uri}" if webfinger.self_link_href != @uri
 
       return
     end
 
-    webfinger                            = webfinger!("acct:#{confirmed_username}@#{confirmed_domain}")
+    webfinger = Webfinger.new("acct:#{confirmed_username}@#{confirmed_domain}").perform
     @username, @domain                   = split_acct(webfinger.subject)
 
     raise Webfinger::RedirectError, "Too many webfinger redirects for URI #{@uri} (stopped at #{@username}@#{@domain})" unless confirmed_username.casecmp(@username).zero? && confirmed_domain.casecmp(@domain).zero?
-
-    raise Error, "Webfinger response for #{@username}@#{@domain} does not loop back to #{@uri}" if webfinger.link('self', 'href') != @uri
+    raise Error, "Webfinger response for #{@username}@#{@domain} does not loop back to #{@uri}" if webfinger.self_link_href != @uri
   rescue Webfinger::RedirectError => e
     raise Error, e.message
   rescue Webfinger::Error => e

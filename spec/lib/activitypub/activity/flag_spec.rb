@@ -36,6 +36,7 @@ RSpec.describe ActivityPub::Activity::Flag do
         expect(report).to_not be_nil
         expect(report.comment).to eq 'Boo!!'
         expect(report.status_ids).to eq [status.id]
+        expect(report.application).to be_nil
       end
     end
 
@@ -54,7 +55,7 @@ RSpec.describe ActivityPub::Activity::Flag do
         }.with_indifferent_access, sender)
       end
 
-      let(:long_comment) { Faker::Lorem.characters(number: 6000) }
+      let(:long_comment) { 'a' * described_class::COMMENT_SIZE_LIMIT * 2 }
 
       before do
         subject.perform
@@ -63,10 +64,12 @@ RSpec.describe ActivityPub::Activity::Flag do
       it 'creates a report but with a truncated comment' do
         report = Report.find_by(account: sender, target_account: flagged)
 
-        expect(report).to_not be_nil
-        expect(report.comment.length).to eq 5000
-        expect(report.comment).to eq long_comment[0...5000]
-        expect(report.status_ids).to eq [status.id]
+        expect(report)
+          .to be_present
+          .and have_attributes(status_ids: [status.id])
+        expect(report.comment)
+          .to have_attributes(length: described_class::COMMENT_SIZE_LIMIT)
+          .and eq(long_comment[0...described_class::COMMENT_SIZE_LIMIT])
       end
     end
 
@@ -140,7 +143,34 @@ RSpec.describe ActivityPub::Activity::Flag do
       end
     end
 
-    context 'when an account is passed but no status' do
+    context 'when the activity includes and account and a collection' do
+      let(:collection) { Fabricate(:collection, account: flagged) }
+      let(:json) do
+        {
+          '@context' => 'https://www.w3.org/ns/activitystreams',
+          'id' => flag_id,
+          'type' => 'Flag',
+          'content' => 'Boo!!',
+          'actor' => ActivityPub::TagManager.instance.uri_for(sender),
+          'object' => [
+            ActivityPub::TagManager.instance.uri_for(flagged),
+            ActivityPub::TagManager.instance.uri_for(collection),
+          ],
+        }
+      end
+
+      it 'creates a report with an attached collection' do
+        subject.perform
+
+        report = Report.find_by(account: sender, target_account: flagged)
+
+        expect(report).to_not be_nil
+        expect(report.comment).to eq 'Boo!!'
+        expect(report.collections).to contain_exactly(collection)
+      end
+    end
+
+    context 'when an account is passed but no status or collection' do
       let(:mentioned) { Fabricate(:account) }
 
       let(:json) do

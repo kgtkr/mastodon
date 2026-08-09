@@ -1,14 +1,18 @@
 import PropTypes from 'prop-types';
 import { PureComponent } from 'react';
 
-import { defineMessages, injectIntl, FormattedMessage } from 'react-intl';
+import { defineMessages, FormattedMessage } from 'react-intl';
 
-import { Helmet } from 'react-helmet';
+import { Helmet } from '@unhead/react/helmet';
 
 import { connect } from 'react-redux';
 
+import PublicIcon from '@/material-icons/400-24px/public.svg?react';
 import { DismissableBanner } from 'mastodon/components/dismissable_banner';
-import { domain } from 'mastodon/initial_state';
+import { injectIntl } from '@/mastodon/components/intl';
+import { identityContextPropShape, withIdentity } from 'mastodon/identity_context';
+import { domain, localLiveFeedAccess, remoteLiveFeedAccess } from 'mastodon/initial_state';
+import { canViewFeed } from 'mastodon/permissions';
 
 import { addColumn, removeColumn, moveColumn } from '../../actions/columns';
 import { connectPublicStream } from '../../actions/streaming';
@@ -39,17 +43,12 @@ const mapStateToProps = (state, { columnId }) => {
 };
 
 class PublicTimeline extends PureComponent {
-
-  static contextTypes = {
-    router: PropTypes.object,
-    identity: PropTypes.object,
-  };
-
   static defaultProps = {
     onlyMedia: false,
   };
 
   static propTypes = {
+    identity: identityContextPropShape,
     dispatch: PropTypes.func.isRequired,
     intl: PropTypes.object.isRequired,
     columnId: PropTypes.string,
@@ -80,7 +79,7 @@ class PublicTimeline extends PureComponent {
 
   componentDidMount () {
     const { dispatch, onlyMedia, onlyRemote } = this.props;
-    const { signedIn } = this.context.identity;
+    const { signedIn } = this.props.identity;
 
     dispatch(expandPublicTimeline({ onlyMedia, onlyRemote }));
 
@@ -90,7 +89,7 @@ class PublicTimeline extends PureComponent {
   }
 
   componentDidUpdate (prevProps) {
-    const { signedIn } = this.context.identity;
+    const { signedIn } = this.props.identity;
 
     if (prevProps.onlyMedia !== this.props.onlyMedia || prevProps.onlyRemote !== this.props.onlyRemote) {
       const { dispatch, onlyMedia, onlyRemote } = this.props;
@@ -126,12 +125,26 @@ class PublicTimeline extends PureComponent {
 
   render () {
     const { intl, columnId, hasUnread, multiColumn, onlyMedia, onlyRemote } = this.props;
+    const { signedIn, permissions } = this.props.identity;
     const pinned = !!columnId;
+
+    const emptyMessage = (canViewFeed(signedIn, permissions, localLiveFeedAccess) || canViewFeed(signedIn, permissions, remoteLiveFeedAccess)) ? (
+      <FormattedMessage
+        id='empty_column.public'
+        defaultMessage='There is nothing here! Write something publicly, or manually follow users from other servers to fill it up'
+      />
+    ) : (
+      <FormattedMessage
+        id='empty_column.disabled_feed'
+        defaultMessage='This feed has been disabled by your server administrators.'
+      />
+    );
 
     return (
       <Column bindToDocument={!multiColumn} ref={this.setRef} label={intl.formatMessage(messages.title)}>
         <ColumnHeader
           icon='globe'
+          iconComponent={PublicIcon}
           active={hasUnread}
           title={intl.formatMessage(messages.title)}
           onPin={this.handlePin}
@@ -144,12 +157,12 @@ class PublicTimeline extends PureComponent {
         </ColumnHeader>
 
         <StatusListContainer
-          prepend={<DismissableBanner id='public_timeline'><FormattedMessage id='dismissable_banner.public_timeline' defaultMessage='These are the most recent public posts from people on the social web that people on {domain} follow.' values={{ domain }} /></DismissableBanner>}
+          prepend={<DismissableBanner id='public_timeline'><FormattedMessage id='dismissable_banner.public_timeline' defaultMessage='These are the most recent public posts from people on the fediverse that people on {domain} follow.' values={{ domain }} /></DismissableBanner>}
           timelineId={`public${onlyRemote ? ':remote' : ''}${onlyMedia ? ':media' : ''}`}
           onLoadMore={this.handleLoadMore}
           trackScroll={!pinned}
           scrollKey={`public_timeline-${columnId}`}
-          emptyMessage={<FormattedMessage id='empty_column.public' defaultMessage='There is nothing here! Write something publicly, or manually follow users from other servers to fill it up' />}
+          emptyMessage={emptyMessage}
           bindToDocument={!multiColumn}
         />
 
@@ -163,4 +176,4 @@ class PublicTimeline extends PureComponent {
 
 }
 
-export default connect(mapStateToProps)(injectIntl(PublicTimeline));
+export default connect(mapStateToProps)(withIdentity(injectIntl(PublicTimeline)));

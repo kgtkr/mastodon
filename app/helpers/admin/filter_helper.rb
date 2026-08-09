@@ -20,12 +20,13 @@ module Admin::FilterHelper
   def filter_link_to(text, link_to_params, link_class_params = link_to_params)
     new_url   = filtered_url_for(link_to_params)
     new_class = filtered_url_for(link_class_params)
+    is_selected = selected?(link_class_params)
 
-    link_to text, new_url, class: filter_link_class(new_class)
+    link_to text, new_url, class: filter_link_class(new_class), 'aria-current': (is_selected ? 'true' : nil)
   end
 
   def table_link_to(icon, text, path, **options)
-    link_to safe_join([fa_icon(icon), text]), path, options.merge(class: 'table-action-link')
+    link_to safe_join([material_symbol(icon), text]), path, options.merge(class: 'table-action-link')
   end
 
   def selected?(more_params)

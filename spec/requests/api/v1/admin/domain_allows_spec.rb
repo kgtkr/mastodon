@@ -3,11 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe 'Domain Allows' do
-  let(:role)    { UserRole.find_by(name: 'Admin') }
-  let(:user)    { Fabricate(:user, role: role) }
-  let(:scopes)  { 'admin:read admin:write' }
-  let(:token)   { Fabricate(:accessible_access_token, resource_owner_id: user.id, scopes: scopes) }
-  let(:headers) { { 'Authorization' => "Bearer #{token.token}" } }
+  include_context 'with API authentication', user_fabricator: :admin_user, oauth_scopes: 'admin:read admin:write'
 
   describe 'GET /api/v1/admin/domain_allows' do
     subject do
@@ -20,22 +16,20 @@ RSpec.describe 'Domain Allows' do
     it_behaves_like 'forbidden for wrong role', ''
     it_behaves_like 'forbidden for wrong role', 'Moderator'
 
-    it 'returns http success' do
-      subject
-
-      expect(response).to have_http_status(200)
-    end
-
     context 'when there is no allowed domains' do
       it 'returns an empty body' do
         subject
 
-        expect(body_as_json).to be_empty
+        expect(response)
+          .to have_http_status(200)
+        expect(response.content_type)
+          .to start_with('application/json')
+        expect(response.parsed_body).to be_empty
       end
     end
 
     context 'when there are allowed domains' do
-      let!(:domain_allows) { Fabricate.times(5, :domain_allow) }
+      let!(:domain_allows) { Fabricate.times(2, :domain_allow) }
       let(:expected_response) do
         domain_allows.map do |domain_allow|
           {
@@ -49,16 +43,21 @@ RSpec.describe 'Domain Allows' do
       it 'returns the correct allowed domains' do
         subject
 
-        expect(body_as_json).to match_array(expected_response)
+        expect(response)
+          .to have_http_status(200)
+        expect(response.content_type)
+          .to start_with('application/json')
+        expect(response.parsed_body)
+          .to match_array(expected_response)
       end
 
       context 'with limit param' do
-        let(:params) { { limit: 2 } }
+        let(:params) { { limit: 1 } }
 
         it 'returns only the requested number of allowed domains' do
           subject
 
-          expect(body_as_json.size).to eq(params[:limit])
+          expect(response.parsed_body.size).to eq(params[:limit])
         end
       end
     end
@@ -75,16 +74,13 @@ RSpec.describe 'Domain Allows' do
     it_behaves_like 'forbidden for wrong role', ''
     it_behaves_like 'forbidden for wrong role', 'Moderator'
 
-    it 'returns http success' do
+    it 'returns the expected allowed domain name', :aggregate_failures do
       subject
 
       expect(response).to have_http_status(200)
-    end
-
-    it 'returns the expected allowed domain name' do
-      subject
-
-      expect(body_as_json[:domain]).to eq domain_allow.domain
+      expect(response.content_type)
+        .to start_with('application/json')
+      expect(response.parsed_body[:domain]).to eq domain_allow.domain
     end
 
     context 'when the requested allowed domain does not exist' do
@@ -92,6 +88,8 @@ RSpec.describe 'Domain Allows' do
         get '/api/v1/admin/domain_allows/-1', headers: headers
 
         expect(response).to have_http_status(404)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
   end
@@ -108,32 +106,26 @@ RSpec.describe 'Domain Allows' do
     it_behaves_like 'forbidden for wrong role', 'Moderator'
 
     context 'with a valid domain name' do
-      it 'returns http success' do
+      it 'returns the expected domain name', :aggregate_failures do
         subject
 
         expect(response).to have_http_status(200)
-      end
-
-      it 'returns the expected domain name' do
-        subject
-
-        expect(body_as_json[:domain]).to eq 'foo.bar.com'
-      end
-
-      it 'creates a domain allow' do
-        subject
-
+        expect(response.content_type)
+          .to start_with('application/json')
+        expect(response.parsed_body[:domain]).to eq 'foo.bar.com'
         expect(DomainAllow.find_by(domain: 'foo.bar.com')).to be_present
       end
     end
 
     context 'with invalid domain name' do
-      let(:params) { 'foo bar' }
+      let(:params) { { domain: 'foo bar' } }
 
       it 'returns http unprocessable entity' do
         subject
 
         expect(response).to have_http_status(422)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
 
@@ -144,6 +136,8 @@ RSpec.describe 'Domain Allows' do
         subject
 
         expect(response).to have_http_status(422)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
 
@@ -155,7 +149,7 @@ RSpec.describe 'Domain Allows' do
       it 'returns the existing allowed domain name' do
         subject
 
-        expect(body_as_json[:domain]).to eq(params[:domain])
+        expect(response.parsed_body[:domain]).to eq(params[:domain])
       end
     end
   end
@@ -171,15 +165,12 @@ RSpec.describe 'Domain Allows' do
     it_behaves_like 'forbidden for wrong role', ''
     it_behaves_like 'forbidden for wrong role', 'Moderator'
 
-    it 'returns http success' do
+    it 'deletes the allowed domain', :aggregate_failures do
       subject
 
       expect(response).to have_http_status(200)
-    end
-
-    it 'deletes the allowed domain' do
-      subject
-
+      expect(response.content_type)
+        .to start_with('application/json')
       expect(DomainAllow.find_by(id: domain_allow.id)).to be_nil
     end
 
@@ -188,6 +179,8 @@ RSpec.describe 'Domain Allows' do
         delete '/api/v1/admin/domain_allows/-1', headers: headers
 
         expect(response).to have_http_status(404)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
   end

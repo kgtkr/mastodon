@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-describe RequestPool do
+RSpec.describe RequestPool do
   subject { described_class.new }
 
   describe '#with' do
@@ -33,17 +33,13 @@ describe RequestPool do
 
       subject
 
-      threads = Array.new(20) do |_i|
-        Thread.new do
-          20.times do
-            subject.with('http://example.com') do |http_client|
-              http_client.get('/').flush
-            end
-          end
+      multi_threaded_execution(5) do
+        subject.with('http://example.com') do |http_client|
+          http_client.get('/').flush
+          # Nudge scheduler to yield and exercise the full pool
+          sleep(0.01)
         end
       end
-
-      threads.map(&:join)
 
       expect(subject.size).to be > 1
     end
@@ -56,11 +52,17 @@ describe RequestPool do
       end
 
       it 'closes the connections' do
-        subject.with('http://example.com') do |http_client|
-          http_client.get('/').flush
+        notifications = capture_notifications('with.request_pool') do
+          subject.with('http://example.com') do |http_client|
+            http_client.get('/').flush
+          end
         end
 
         expect { reaper_observes_idle_timeout }.to change(subject, :size).from(1).to(0)
+
+        expect(notifications.size).to eq(1)
+        expect(notifications.first.payload[:host]).to eq('http://example.com')
+        expect(notifications.first.payload[:miss]).to be(true)
       end
 
       def reaper_observes_idle_timeout

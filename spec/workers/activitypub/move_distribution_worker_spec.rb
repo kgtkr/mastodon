@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-describe ActivityPub::MoveDistributionWorker do
+RSpec.describe ActivityPub::MoveDistributionWorker do
   subject { described_class.new }
 
   let(:migration) { Fabricate(:account_migration) }
@@ -16,11 +16,11 @@ describe ActivityPub::MoveDistributionWorker do
     end
 
     it 'delivers to followers and known blockers' do
-      expect_push_bulk_to_match(ActivityPub::DeliveryWorker, [
-                                  [kind_of(String), migration.account.id, 'http://example.com'],
-                                  [kind_of(String), migration.account.id, 'http://example2.com'],
-                                ])
       subject.perform(migration.id)
+
+      expect(ActivityPub::DeliveryWorker)
+        .to have_enqueued_sidekiq_job(match_json_values(type: 'Move'), migration.account.id, 'http://example.com')
+        .and have_enqueued_sidekiq_job(match_json_values(type: 'Move'), migration.account.id, 'http://example2.com')
     end
   end
 end

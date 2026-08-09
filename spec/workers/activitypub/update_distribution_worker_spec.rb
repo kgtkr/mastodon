@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-describe ActivityPub::UpdateDistributionWorker do
+RSpec.describe ActivityPub::UpdateDistributionWorker do
   subject { described_class.new }
 
   let(:account)  { Fabricate(:account) }
@@ -14,8 +14,10 @@ describe ActivityPub::UpdateDistributionWorker do
     end
 
     it 'delivers to followers' do
-      expect_push_bulk_to_match(ActivityPub::DeliveryWorker, [[kind_of(String), account.id, 'http://example.com', anything]])
       subject.perform(account.id)
+
+      expect(ActivityPub::DeliveryWorker)
+        .to have_enqueued_sidekiq_job(match_json_values(type: 'Update'), account.id, 'http://example.com', anything)
     end
   end
 end

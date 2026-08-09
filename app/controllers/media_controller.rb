@@ -19,24 +19,17 @@ class MediaController < ApplicationController
     redirect_to @media_attachment.file.url(:original)
   end
 
-  def player
-    @body_classes = 'player'
-  end
+  def player; end
 
   private
 
   def set_media_attachment
-    id = params[:id] || params[:medium_id]
-    return if id.nil?
-
-    scope = MediaAttachment.local.attached
-    # If id is 19 characters long, it's a shortcode, otherwise it's an identifier
-    @media_attachment = id.size == 19 ? scope.find_by!(shortcode: id) : scope.find(id)
+    @media_attachment = MediaAttachment.local.attached.identified(params[:id])
   end
 
   def verify_permitted_status!
     authorize @media_attachment.status, :show?
-  rescue Mastodon::NotPermittedError
+  rescue ActiveRecord::RecordNotFound, Mastodon::NotPermittedError
     not_found
   end
 

@@ -5,19 +5,23 @@
 # Table name: notifications
 #
 #  id              :bigint(8)        not null, primary key
-#  activity_id     :bigint(8)        not null
 #  activity_type   :string           not null
+#  filtered        :boolean          default(FALSE), not null
+#  group_key       :string
+#  type            :string
 #  created_at      :datetime         not null
 #  updated_at      :datetime         not null
 #  account_id      :bigint(8)        not null
+#  activity_id     :bigint(8)        not null
 #  from_account_id :bigint(8)        not null
-#  type            :string
 #
 
 class Notification < ApplicationRecord
   self.inheritance_column = nil
 
+  include Notification::Groups
   include Paginable
+  include Redisable
 
   LEGACY_TYPE_CLASS_MAP = {
     'Mention' => :mention,
@@ -26,28 +30,92 @@ class Notification < ApplicationRecord
     'FollowRequest' => :follow_request,
     'Favourite' => :favourite,
     'Poll' => :poll,
+    'Quote' => :quote,
   }.freeze
 
-  TYPES = %i(
-    mention
-    status
-    reblog
-    follow
-    follow_request
-    favourite
-    poll
-    update
-    admin.sign_up
-    admin.report
-  ).freeze
+  # Please update app/javascript/mastodon/api_types/notifications.ts if you change this
+  PROPERTIES = {
+    mention: {
+      filterable: true,
+      baseline: true,
+    }.freeze,
+    status: {
+      filterable: false,
+      baseline: true,
+    }.freeze,
+    reblog: {
+      filterable: true,
+      baseline: true,
+    }.freeze,
+    follow: {
+      filterable: true,
+      baseline: true,
+    }.freeze,
+    follow_request: {
+      filterable: true,
+      baseline: true,
+    }.freeze,
+    favourite: {
+      filterable: true,
+      baseline: true,
+    }.freeze,
+    poll: {
+      filterable: false,
+      baseline: true,
+    }.freeze,
+    update: {
+      filterable: false,
+      baseline: true,
+    }.freeze,
+    severed_relationships: {
+      filterable: false,
+      baseline: false,
+    }.freeze,
+    moderation_warning: {
+      filterable: false,
+      baseline: false,
+    }.freeze,
+    annual_report: {
+      filterable: false,
+      baseline: true,
+    }.freeze,
+    'admin.sign_up': {
+      filterable: false,
+      baseline: false,
+    }.freeze,
+    'admin.report': {
+      filterable: false,
+      baseline: false,
+    }.freeze,
+    quote: {
+      filterable: true,
+      baseline: true,
+    }.freeze,
+    quoted_update: {
+      filterable: false,
+      baseline: true,
+    }.freeze,
+    added_to_collection: {
+      filterable: true,
+      baseline: false,
+    }.freeze,
+    collection_update: {
+      filterable: false,
+      baseline: false,
+    }.freeze,
+  }.freeze
+
+  TYPES = PROPERTIES.keys.freeze
 
   TARGET_STATUS_INCLUDES_BY_TYPE = {
     status: :status,
     reblog: [status: :reblog],
     mention: [mention: :status],
+    quote: [quote: :status],
     favourite: [favourite: :status],
     poll: [poll: :status],
     update: :status,
+    quoted_update: :status,
     'admin.report': [report: :target_account],
   }.freeze
 
@@ -63,6 +131,12 @@ class Notification < ApplicationRecord
     belongs_to :favourite, inverse_of: :notification
     belongs_to :poll, inverse_of: false
     belongs_to :report, inverse_of: false
+    belongs_to :account_relationship_severance_event, inverse_of: false
+    belongs_to :account_warning, inverse_of: false
+    belongs_to :generated_annual_report, inverse_of: false
+    belongs_to :quote, inverse_of: :notification
+    belongs_to :collection_item, inverse_of: false # TODO: have an inverse?
+    belongs_to :collection, inverse_of: :notifications
   end
 
   validates :type, inclusion: { in: TYPES }
@@ -75,7 +149,7 @@ class Notification < ApplicationRecord
 
   def target_status
     case type
-    when :status, :update
+    when :status, :update, :quoted_update
       status
     when :reblog
       status&.reblog
@@ -83,13 +157,24 @@ class Notification < ApplicationRecord
       favourite&.status
     when :mention
       mention&.status
+    when :quote
+      quote&.status
     when :poll
       poll&.status
     end
   end
 
+  def target_collection
+    case type
+    when :added_to_collection
+      collection_item&.collection
+    when :collection_update
+      collection
+    end
+  end
+
   class << self
-    def browserable(types: [], exclude_types: [], from_account_id: nil)
+    def browserable(types: [], exclude_types: [], from_account_id: nil, include_filtered: false)
       requested_types = if types.empty?
                           TYPES
                         else
@@ -99,6 +184,7 @@ class Notification < ApplicationRecord
       requested_types -= exclude_types.map(&:to_sym)
 
       all.tap do |scope|
+        scope.merge!(where(filtered: false)) unless include_filtered || from_account_id.present?
         scope.merge!(where(from_account_id: from_account_id)) if from_account_id.present?
         scope.merge!(where(type: requested_types)) unless requested_types.size == TYPES.size
       end
@@ -111,7 +197,7 @@ class Notification < ApplicationRecord
 
         # Instead of using the usual `includes`, manually preload each type.
         # If polymorphic associations are loaded with the usual `includes`, other types of associations will be loaded more.
-        ActiveRecord::Associations::Preloader.new(records: grouped_notifications, associations: associations)
+        ActiveRecord::Associations::Preloader.new(records: grouped_notifications, associations: associations).call
       end
 
       unique_target_statuses = notifications.filter_map(&:target_status).uniq
@@ -124,7 +210,7 @@ class Notification < ApplicationRecord
         cached_status = cached_statuses_by_id[notification.target_status.id]
 
         case notification.type
-        when :status, :update
+        when :status, :update, :quoted_update
           notification.status = cached_status
         when :reblog
           notification.status.reblog = cached_status
@@ -134,6 +220,8 @@ class Notification < ApplicationRecord
           notification.mention.status = cached_status
         when :poll
           notification.poll.status = cached_status
+        when :quote
+          notification.quote.status = cached_status
         end
       end
 
@@ -144,18 +232,34 @@ class Notification < ApplicationRecord
   after_initialize :set_from_account
   before_validation :set_from_account
 
+  after_destroy :remove_from_notification_request
+
   private
 
   def set_from_account
     return unless new_record?
 
     case activity_type
-    when 'Status', 'Follow', 'Favourite', 'FollowRequest', 'Poll', 'Report'
+    when 'Status'
+      self.from_account_id = type == :quoted_update ? activity&.quote&.quoted_account_id : activity&.account_id
+    when 'Follow', 'Favourite', 'FollowRequest', 'Poll', 'Report', 'Quote', 'Collection'
       self.from_account_id = activity&.account_id
+    when 'CollectionItem'
+      self.from_account_id = activity&.collection&.account_id
     when 'Mention'
       self.from_account_id = activity&.status&.account_id
     when 'Account'
       self.from_account_id = activity&.id
+    when 'AccountRelationshipSeveranceEvent', 'AccountWarning', 'GeneratedAnnualReport'
+      # These do not really have an originating account, but this is mandatory
+      # in the data model, and the recipient's account will by definition
+      # always exist
+      self.from_account_id = account_id
     end
+  end
+
+  def remove_from_notification_request
+    notification_request = NotificationRequest.find_by(account_id: account_id, from_account_id: from_account_id)
+    notification_request&.reconsider_existence!
   end
 end

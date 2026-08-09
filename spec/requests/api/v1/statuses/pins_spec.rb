@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-describe 'Pins' do
+RSpec.describe 'Pins' do
   let(:user)    { Fabricate(:user) }
   let(:scopes)  { 'write:accounts' }
   let(:token)   { Fabricate(:accessible_access_token, resource_owner_id: user.id, scopes: scopes) }
@@ -18,19 +18,19 @@ describe 'Pins' do
     it_behaves_like 'forbidden for wrong scope', 'read read:accounts'
 
     context 'when the status is public' do
-      it 'pins the status successfully', :aggregate_failures do
+      it 'pins the status successfully and returns updated json', :aggregate_failures do
         subject
 
         expect(response).to have_http_status(200)
+        expect(response.content_type)
+          .to start_with('application/json')
         expect(user.account.pinned?(status)).to be true
-      end
 
-      it 'return json with updated attributes' do
-        subject
-
-        expect(body_as_json).to match(
+        expect(response.parsed_body).to match(
           a_hash_including(id: status.id.to_s, pinned: true)
         )
+        expect(ActivityPub::RawDistributionWorker)
+          .to have_enqueued_sidekiq_job(match_json_values(type: 'Add'), user.account.id)
       end
     end
 
@@ -41,6 +41,8 @@ describe 'Pins' do
         subject
 
         expect(response).to have_http_status(200)
+        expect(response.content_type)
+          .to start_with('application/json')
         expect(user.account.pinned?(status)).to be true
       end
     end
@@ -52,6 +54,23 @@ describe 'Pins' do
         subject
 
         expect(response).to have_http_status(422)
+        expect(response.content_type)
+          .to start_with('application/json')
+      end
+    end
+
+    context 'when the account is already at MAX status pins' do
+      before { StatusPinValidator::PIN_LIMIT.times { Fabricate(:status_pin, account: user.account) } }
+
+      it 'returns http unprocessable entity' do
+        subject
+
+        expect(response)
+          .to have_http_status(422)
+        expect(response.media_type)
+          .to eq('application/json')
+        expect(response.parsed_body)
+          .to include(error: /already pinned the maximum/)
       end
     end
 
@@ -60,6 +79,8 @@ describe 'Pins' do
         post '/api/v1/statuses/-1/pin', headers: headers
 
         expect(response).to have_http_status(404)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
 
@@ -70,6 +91,8 @@ describe 'Pins' do
         subject
 
         expect(response).to have_http_status(401)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
   end
@@ -86,19 +109,19 @@ describe 'Pins' do
         Fabricate(:status_pin, status: status, account: user.account)
       end
 
-      it 'unpins the status successfully', :aggregate_failures do
+      it 'unpins the status successfully and includes updated json', :aggregate_failures do
         subject
 
         expect(response).to have_http_status(200)
+        expect(response.content_type)
+          .to start_with('application/json')
         expect(user.account.pinned?(status)).to be false
-      end
 
-      it 'return json with updated attributes' do
-        subject
-
-        expect(body_as_json).to match(
+        expect(response.parsed_body).to match(
           a_hash_including(id: status.id.to_s, pinned: false)
         )
+        expect(ActivityPub::RawDistributionWorker)
+          .to have_enqueued_sidekiq_job(match_json_values(type: 'Remove'), user.account.id)
       end
     end
 
@@ -107,6 +130,8 @@ describe 'Pins' do
         subject
 
         expect(response).to have_http_status(200)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
 
@@ -115,6 +140,8 @@ describe 'Pins' do
         post '/api/v1/statuses/-1/unpin', headers: headers
 
         expect(response).to have_http_status(404)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
 
@@ -125,6 +152,8 @@ describe 'Pins' do
         subject
 
         expect(response).to have_http_status(401)
+        expect(response.content_type)
+          .to start_with('application/json')
       end
     end
   end

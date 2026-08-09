@@ -8,6 +8,8 @@ class CustomEmojiFilter
     shortcode
   ).freeze
 
+  IGNORED_PARAMS = %w(page).freeze
+
   attr_reader :params
 
   def initialize(params)
@@ -17,8 +19,8 @@ class CustomEmojiFilter
   def results
     scope = CustomEmoji.alphabetic
 
-    params.each do |key, value|
-      next if key.to_s == 'page'
+    relevant_params.each do |key, value|
+      next if IGNORED_PARAMS.include?(key.to_s)
 
       scope.merge!(scope_for(key, value)) if value.present?
     end
@@ -28,14 +30,20 @@ class CustomEmojiFilter
 
   private
 
+  def relevant_params
+    params.tap do |args|
+      args.delete(:by_domain) if args[:local].present?
+    end
+  end
+
   def scope_for(key, value)
     case key.to_s
     when 'local'
-      CustomEmoji.local.left_joins(:category).reorder(Arel.sql('custom_emoji_categories.name ASC NULLS FIRST, custom_emojis.shortcode ASC'))
+      CustomEmoji.local.left_joins(:category).reorder(CustomEmojiCategory.arel_table[:name].asc.nulls_first).order(shortcode: :asc)
     when 'remote'
       CustomEmoji.remote
     when 'by_domain'
-      CustomEmoji.where(domain: value.strip.downcase)
+      CustomEmoji.where(domain: value)
     when 'shortcode'
       CustomEmoji.search(value.strip)
     else

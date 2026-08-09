@@ -12,7 +12,7 @@ class Export
   def to_bookmarks_csv
     CSV.generate do |csv|
       account.bookmarks.includes(:status).reorder(id: :desc).each do |bookmark|
-        csv << [ActivityPub::TagManager.instance.uri_for(bookmark.status)]
+        csv << [ActivityPub::TagManager.instance.uri_for(bookmark.status)] if bookmark.status.present?
       end
     end
   end
@@ -55,40 +55,21 @@ class Export
     end
   end
 
-  def total_storage
-    account.media_attachments.sum(:file_file_size)
-  end
+  def to_custom_filters_json
+    data_collection = { custom_filters: [] }
+    account.custom_filters.includes(:keywords, :statuses).order(:phrase).each do |filter|
+      keywords_attributes = filter.keywords.map { |k| { keyword: k.keyword, whole_word: k.whole_word } }
 
-  def total_statuses
-    account.statuses_count
-  end
-
-  def total_bookmarks
-    account.bookmarks.count
-  end
-
-  def total_follows
-    account.following_count
-  end
-
-  def total_lists
-    account.owned_lists.count
-  end
-
-  def total_followers
-    account.followers_count
-  end
-
-  def total_blocks
-    account.blocking.count
-  end
-
-  def total_mutes
-    account.muting.count
-  end
-
-  def total_domain_blocks
-    account.domain_blocks.count
+      data_collection[:custom_filters] << {
+        title: filter.title,
+        expires_at: filter.expires_at,
+        context: filter.context,
+        action: filter.action,
+        keywords_attributes: keywords_attributes,
+        statuses: filter.statuses.map { |s| ActivityPub::TagManager.instance.uri_for(s.status) },
+      }
+    end
+    JSON.generate(data_collection)
   end
 
   private
