@@ -8,13 +8,11 @@
 
 ## 1. ブランチの役割と運用方針
 
-このリポジトリでは、本家の上流変更を追従しつつ独自カスタマイズを管理するため、以下のブランチ運用を行っています。
+このリポジトリでは、本家の上流変更を追従しつつ独自カスタマイズを管理するため、以下のシンプルかつ堅牢な単一ブランチ運用を行っています。
 
 | ブランチ名 | 役割 | 運用方針・マージルール |
 | :--- | :--- | :--- |
-| **`kgtkr-master`** | 独自カスタマイズのメイン開発ブランチ | * 本家（upstream）の `main` に対応します。<br>* **独自の機能追加やカスタマイズのコミットは、このブランチに対して直接適用します。** |
-| **`kgtkr-$MINOR_VERSION`**<br>(例: `kgtkr-4.6`) | 各マイナーバージョンのリリースブランチ | * 本家の `stable-$MINOR_VERSION` に対応します。<br>* **このブランチには直接独自のパッチをコミットしてはいけません。**<br>* `kgtkr-master` の変更と本家の特定リリースバージョンタグ（例: `v4.6.3`）をそれぞれマージして運用します。 |
-| **`mstdn.kgtkr.net`** | サーバーデプロイ（イメージ構築）用ブランチ | * 実際に稼働させるサーバー用のブランチです。<br>* 常に最新の `kgtkr-$MINOR_VERSION` と同一のコミットを参照します。<br>* マイナーバージョン更新のたびに `git reset --hard kgtkr-$MINOR_VERSION` が実行されるため、**このブランチの履歴はマイナーバージョン変更時に破壊（改変）されます。** |
+| **`kgtkr-master`** | メイン開発・運用ブランチ | * 独自カスタマイズおよび本家（upstream）の最新安定版リリース（`vX.Y.Z`）が統合されるメインブランチです。<br>* **独自の機能追加やカスタマイズのコミットは、このブランチに対して適用します。**<br>* このブランチに更新がコミット・マージされると、後続の Docker イメージ構築（`kgtkr-build-image.yml`）が自動発火し、本番イメージがビルド・デプロイされます。 |
 
 ---
 
@@ -23,23 +21,20 @@
 本家の新しい安定版リリース（`vX.Y.Z`）を追従する際は、`kgtkr-update.sh` スクリプトまたは GitHub Actions の自動アップデートワークフローを使用します。
 
 ### ① GitHub Actions による自動アップデート（推奨フロー）
-* **定期チェック (`kgtkr-auto-update-check.yml`)**:
+* **定期チェック ＆ PR自動作成 (`kgtkr-auto-update-check.yml`)**:
   * 毎日定期実行（または手動実行）され、`upstream` の最新安定版タグをチェックします。
-  * 未適用のアップデートがあれば、`kgtkr/update/vX.Y.Z` ブランチを作成し `./kgtkr-update.sh master <VERSION>` を実行します。
-  * コンフリクトが発生した場合、`google-github-actions/run-gemini-cli` (Gemini CLI) がこの `AGENTS.md` の独自仕様ルールに基づき自動解消します。
+  * 未適用のアップデートがあれば、`kgtkr/update/vX.Y.Z` ブランチを作成し `./kgtkr-update.sh <VERSION>` を実行します。
+  * マージ時にコンフリクトが発生した場合、`gemini` (Gemini CLI) がこの `AGENTS.md` の独自仕様ルールに基づき自動解消します。
   * コンフリクト解消後、`kgtkr-master` に向けた **Pull Request** が自動作成され、人間にレビューが依頼されます。
-* **リリース・デプロイ (`kgtkr-auto-update-release.yml`)**:
-  * 人間が PR をレビューしてマージすると発火し、`./kgtkr-update.sh release <VERSION>` を実行します。
-  * `kgtkr-$MINOR_VERSION` および `mstdn.kgtkr.net` が更新（`PAT` により push）され、後続の Docker イメージ構築（`kgtkr-build-image.yml`）が自動でトリガーされます。
+* **人間のレビュー ＆ デプロイ**:
+  * 人間が PR をレビューして `kgtkr-master` にマージすると、`kgtkr-build-image.yml` が自動発火し、最新の Docker コンテナイメージが全自動でビルド・配信されます。
 
-### ② `kgtkr-update.sh` のサブコマンド仕様
-手動でアップデートを実行する場合、またはCIから部分的に呼ぶ場合はサブコマンドを使用します。
+### ② 手動アップデート
+手動でアップデートを実行する場合、またはCIから呼ぶ場合は `./kgtkr-update.sh <VERSION>` を実行します。
 
-| サブコマンド | コマンド例 | 処理内容 |
-| :--- | :--- | :--- |
-| `master` | `./kgtkr-update.sh master 4.6.3` | `kgtkr-master` (または作業ブランチ) に `vX.Y.Z` をマージ。 |
-| `release` | `./kgtkr-update.sh release 4.6.3` | `kgtkr-$MINOR_VERSION` に `kgtkr-master` と `vX.Y.Z` をマージし、`mstdn.kgtkr.net` を `kgtkr-$MINOR_VERSION` へ強制リセット。 |
-| `all` (既定) | `./kgtkr-update.sh 4.6.3` | `master` と `release` を連続実行（従来の手動一括更新動作）。 |
+```sh
+./kgtkr-update.sh 4.6.5
+```
 
 ---
 
@@ -59,7 +54,7 @@
 本家タグ（例: `v4.6.3`）との差分は、以下のコマンド等で確認できます。
 
 ```sh
-git diff v4.6.3 kgtkr-4.6
+git diff v4.6.3 kgtkr-master
 ```
 
 ### ① 日本語全文検索の強化（Sudachiの導入）
@@ -82,7 +77,5 @@ git diff v4.6.3 kgtkr-4.6
 
 * **独自機能やカスタマイズの追加・修正**
   * 必ず `kgtkr-master` ブランチ上で作業を行いコミットしてください。
-  * `kgtkr-$MINOR_VERSION` や `mstdn.kgtkr.net` ブランチに直接カスタマイズコードをコミットしてはいけません。
 * **コンフリクト発生時の対応**
   * アップデートマージの際にコンフリクトが発生した場合は、`kgtkr-master` に適用された独自仕様（例: ヘッダーダウンロードのスキップ等）を壊さないよう注意深くコードをマージしてください。
-  * マージ完了後は本番環境用ブランチ（`mstdn.kgtkr.net`）へのデプロイ（強制リセットとプッシュ）を確実に行ってください。

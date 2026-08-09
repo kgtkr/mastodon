@@ -69,7 +69,7 @@ jobs:
           BRANCH_NAME="kgtkr/update/v$VERSION"
 
           git checkout -b "$BRANCH_NAME" origin/kgtkr-master
-          ./kgtkr-update.sh master "$VERSION"
+          ./kgtkr-update.sh "$VERSION"
 
           CONFLICT_FILES=$(git diff --name-only --diff-filter=U || true)
           if [ -n "$CONFLICT_FILES" ]; then
