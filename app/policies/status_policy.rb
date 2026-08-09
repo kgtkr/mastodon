@@ -1,14 +1,8 @@
 # frozen_string_literal: true
 
 class StatusPolicy < ApplicationPolicy
-  def initialize(current_account, record, preloaded_relations = {})
-    super(current_account, record)
-
-    @preloaded_relations = preloaded_relations
-  end
-
   def show?
-    return false if author.suspended?
+    return false if author.unavailable?
 
     if requires_mention?
       owned? || mention_exists?
@@ -17,6 +11,10 @@ class StatusPolicy < ApplicationPolicy
     else
       current_account.nil? || (!author_blocking? && !author_blocking_domain?)
     end
+  end
+
+  def quote?
+    show? && !blocking_author? && record.quote_policy_for_account(current_account) != :denied
   end
 
   def reblog?
@@ -57,7 +55,7 @@ class StatusPolicy < ApplicationPolicy
     if record.mentions.loaded?
       record.mentions.any? { |mention| mention.account_id == current_account.id }
     else
-      record.mentions.where(account: current_account).exists?
+      record.mentions.exists?(account: current_account)
     end
   end
 
@@ -70,19 +68,19 @@ class StatusPolicy < ApplicationPolicy
   def blocking_author?
     return false if current_account.nil?
 
-    @preloaded_relations[:blocking] ? @preloaded_relations[:blocking][author.id] : current_account.blocking?(author)
+    current_account.blocking?(author)
   end
 
   def author_blocking?
     return false if current_account.nil?
 
-    @preloaded_relations[:blocked_by] ? @preloaded_relations[:blocked_by][author.id] : author.blocking?(current_account)
+    current_account.blocked_by?(author)
   end
 
   def following_author?
     return false if current_account.nil?
 
-    @preloaded_relations[:following] ? @preloaded_relations[:following][author.id] : current_account.following?(author)
+    current_account.following?(author)
   end
 
   def author

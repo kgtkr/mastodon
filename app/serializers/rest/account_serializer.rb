@@ -6,9 +6,10 @@ class REST::AccountSerializer < ActiveModel::Serializer
 
   # Please update `app/javascript/mastodon/api_types/accounts.ts` when making changes to the attributes
 
-  attributes :id, :username, :acct, :display_name, :locked, :bot, :discoverable, :group, :created_at,
-             :note, :url, :uri, :avatar, :avatar_static, :header, :header_static,
-             :followers_count, :following_count, :statuses_count, :last_status_at
+  attributes :id, :username, :acct, :display_name, :locked, :bot, :discoverable, :indexable, :group, :created_at,
+             :note, :url, :uri, :avatar, :avatar_static, :avatar_description, :header, :header_static, :header_description,
+             :followers_count, :following_count, :statuses_count, :last_status_at, :hide_collections,
+             :show_media, :show_media_replies, :show_featured
 
   has_one :moved_to_account, key: :moved, serializer: REST::AccountSerializer, if: :moved_and_not_nested?
 
@@ -19,6 +20,9 @@ class REST::AccountSerializer < ActiveModel::Serializer
   attribute :noindex, if: :local?
 
   attribute :memorial, if: :memorial?
+
+  attribute :feature_approval
+  attribute :email_subscriptions, if: -> { Rails.application.config.x.email_subscriptions && Setting.email_subscriptions }
 
   class AccountDecorator < SimpleDelegator
     def self.model_name
@@ -61,11 +65,11 @@ class REST::AccountSerializer < ActiveModel::Serializer
   end
 
   def note
-    object.suspended? ? '' : account_bio_format(object)
+    object.unavailable? ? '' : account_bio_format(object)
   end
 
   def url
-    ActivityPub::TagManager.instance.url_for(object)
+    ActivityPub::TagManager.instance.url_for(object) || ActivityPub::TagManager.instance.uri_for(object)
   end
 
   def uri
@@ -73,19 +77,27 @@ class REST::AccountSerializer < ActiveModel::Serializer
   end
 
   def avatar
-    full_asset_url(object.suspended? ? object.avatar.default_url : object.avatar_original_url)
+    full_asset_url(object.unavailable? ? object.avatar.default_url : object.avatar_original_url)
   end
 
   def avatar_static
-    full_asset_url(object.suspended? ? object.avatar.default_url : object.avatar_static_url)
+    full_asset_url(object.unavailable? ? object.avatar.default_url : object.avatar_static_url)
+  end
+
+  def avatar_description
+    object.unavailable? ? '' : object.avatar_description
   end
 
   def header
-    full_asset_url(object.suspended? ? object.header.default_url : object.header_original_url)
+    full_asset_url(object.unavailable? ? object.header.default_url : object.header_original_url)
   end
 
   def header_static
-    full_asset_url(object.suspended? ? object.header.default_url : object.header_static_url)
+    full_asset_url(object.unavailable? ? object.header.default_url : object.header_static_url)
+  end
+
+  def header_description
+    object.unavailable? ? '' : object.header_description
   end
 
   def created_at
@@ -97,35 +109,39 @@ class REST::AccountSerializer < ActiveModel::Serializer
   end
 
   def display_name
-    object.suspended? ? '' : object.display_name
+    object.unavailable? ? '' : object.display_name
   end
 
   def locked
-    object.suspended? ? false : object.locked
+    object.unavailable? ? false : object.locked
   end
 
   def bot
-    object.suspended? ? false : object.bot
+    object.unavailable? ? false : object.bot
   end
 
   def discoverable
-    object.suspended? ? false : object.discoverable
+    object.unavailable? ? false : object.discoverable
+  end
+
+  def indexable
+    object.unavailable? ? false : object.indexable
   end
 
   def moved_to_account
-    object.suspended? ? nil : AccountDecorator.new(object.moved_to_account)
+    object.unavailable? ? nil : AccountDecorator.new(object.moved_to_account)
   end
 
   def emojis
-    object.suspended? ? [] : object.emojis
+    object.unavailable? ? [] : object.emojis
   end
 
   def fields
-    object.suspended? ? [] : object.fields
+    object.unavailable? ? [] : object.fields
   end
 
   def suspended
-    object.suspended?
+    object.unavailable?
   end
 
   def silenced
@@ -137,7 +153,7 @@ class REST::AccountSerializer < ActiveModel::Serializer
   end
 
   def roles
-    if object.suspended? || object.user.nil?
+    if object.unavailable? || object.user.nil?
       []
     else
       [object.user.role].compact.filter(&:highlighted?)
@@ -152,5 +168,17 @@ class REST::AccountSerializer < ActiveModel::Serializer
 
   def moved_and_not_nested?
     object.moved?
+  end
+
+  def feature_approval
+    {
+      automatic: object.feature_policy_as_keys(:automatic),
+      manual: object.feature_policy_as_keys(:manual),
+      current_user: object.feature_policy_for_account(current_user&.account),
+    }
+  end
+
+  def email_subscriptions
+    object.user_can?(:manage_email_subscriptions) && object.user_email_subscriptions_enabled?
   end
 end

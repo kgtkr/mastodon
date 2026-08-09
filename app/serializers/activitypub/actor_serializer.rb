@@ -4,27 +4,35 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
   include RoutingHelper
   include FormattingHelper
 
-  context :security
+  context :security, :webfinger
 
   context_extensions :manually_approves_followers, :featured, :also_known_as,
-                     :moved_to, :property_value, :discoverable, :olm, :suspended,
-                     :memorial, :indexable
+                     :moved_to, :property_value, :discoverable, :suspended,
+                     :memorial, :indexable, :attribution_domains, :profile_settings
 
-  attributes :id, :type, :following, :followers,
+  context_extensions :interaction_policies
+
+  attributes :id, :webfinger, :type, :following, :followers,
              :inbox, :outbox, :featured, :featured_tags,
              :preferred_username, :name, :summary,
              :url, :manually_approves_followers,
-             :discoverable, :indexable, :published, :memorial
+             :discoverable, :indexable, :published, :memorial,
+             :show_featured, :show_media
+
+  attribute :show_media_replies, key: :show_replies_in_media
+
+  attribute :interaction_policy
+  attribute :featured_collections
 
   has_one :public_key, serializer: ActivityPub::PublicKeySerializer
 
   has_many :virtual_tags, key: :tag
   has_many :virtual_attachments, key: :attachment
 
-  attribute :devices, unless: :instance_actor?
   attribute :moved_to, if: :moved?
   attribute :also_known_as, if: :also_known_as?
   attribute :suspended, if: :suspended?
+  attribute :attribution_domains, if: -> { object.attribution_domains.any? }
 
   class EndpointsSerializer < ActivityPub::Serializer
     include RoutingHelper
@@ -36,6 +44,16 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
     end
   end
 
+  class ImageWithDescription < SimpleDelegator
+    attr_reader :description
+
+    def initialize(object, description)
+      super(object)
+
+      @description = description
+    end
+  end
+
   has_one :endpoints, serializer: EndpointsSerializer
 
   has_one :icon,  serializer: ActivityPub::ImageSerializer, if: :avatar_exists?
@@ -44,7 +62,11 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
   delegate :suspended?, :instance_actor?, to: :object
 
   def id
-    object.instance_actor? ? instance_actor_url : account_url(object)
+    ActivityPub::TagManager.instance.uri_for(object)
+  end
+
+  def webfinger
+    object.local_username_and_domain
   end
 
   def type
@@ -60,31 +82,27 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
   end
 
   def following
-    account_following_index_url(object)
+    ActivityPub::TagManager.instance.following_uri_for(object)
   end
 
   def followers
-    account_followers_url(object)
+    ActivityPub::TagManager.instance.followers_uri_for(object)
   end
 
   def inbox
-    object.instance_actor? ? instance_actor_inbox_url : account_inbox_url(object)
-  end
-
-  def devices
-    account_collection_url(object, :devices)
+    ActivityPub::TagManager.instance.inbox_uri_for(object)
   end
 
   def outbox
-    object.instance_actor? ? instance_actor_outbox_url : account_outbox_url(object)
+    ActivityPub::TagManager.instance.outbox_uri_for(object)
   end
 
   def featured
-    account_collection_url(object, :featured)
+    ActivityPub::TagManager.instance.collection_uri_for(object, :featured)
   end
 
   def featured_tags
-    account_collection_url(object, :tags)
+    ActivityPub::TagManager.instance.collection_uri_for(object, :tags)
   end
 
   def endpoints
@@ -96,27 +114,27 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
   end
 
   def discoverable
-    object.suspended? ? false : (object.discoverable || false)
+    object.unavailable? ? false : (object.discoverable || false)
   end
 
   def indexable
-    object.suspended? ? false : (object.indexable || false)
+    object.unavailable? ? false : (object.indexable || false)
   end
 
   def name
-    object.suspended? ? object.username : (object.display_name.presence || object.username)
+    object.unavailable? ? object.username : (object.display_name.presence || object.username)
   end
 
   def summary
-    object.suspended? ? '' : account_bio_format(object)
+    object.unavailable? ? '' : account_bio_format(object)
   end
 
   def icon
-    object.avatar
+    ImageWithDescription.new(object.avatar, object.avatar_description)
   end
 
   def image
-    object.header
+    ImageWithDescription.new(object.header, object.header_description)
   end
 
   def public_key
@@ -132,23 +150,23 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
   end
 
   def avatar_exists?
-    !object.suspended? && object.avatar?
+    !object.unavailable? && object.avatar?
   end
 
   def header_exists?
-    !object.suspended? && object.header?
+    !object.unavailable? && object.header?
   end
 
   def manually_approves_followers
-    object.suspended? ? false : object.locked
+    object.unavailable? ? false : object.locked
   end
 
   def virtual_tags
-    object.suspended? ? [] : (object.emojis + object.tags)
+    object.unavailable? ? [] : (object.emojis + object.tags)
   end
 
   def virtual_attachments
-    object.suspended? ? [] : object.fields
+    object.unavailable? ? [] : object.fields
   end
 
   def moved_to
@@ -156,15 +174,39 @@ class ActivityPub::ActorSerializer < ActivityPub::Serializer
   end
 
   def moved?
-    !object.suspended? && object.moved?
+    !object.unavailable? && object.moved?
   end
 
   def also_known_as?
-    !object.suspended? && !object.also_known_as.empty?
+    !object.unavailable? && !object.also_known_as.empty?
   end
 
   def published
     object.created_at.midnight.iso8601
+  end
+
+  def interaction_policy
+    uri = begin
+      if !object.discoverable?
+        ActivityPub::TagManager.instance.uri_for(object)
+      elsif object.locked?
+        ActivityPub::TagManager.instance.followers_uri_for(object)
+      else
+        ActivityPub::TagManager::COLLECTIONS[:public]
+      end
+    end
+
+    {
+      canFeature: {
+        automaticApproval: [uri],
+      },
+    }
+  end
+
+  def featured_collections
+    return nil if instance_actor?
+
+    ap_account_featured_collections_url(object.id)
   end
 
   class CustomEmojiSerializer < ActivityPub::EmojiSerializer

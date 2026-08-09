@@ -15,9 +15,16 @@ pt-BR:
       user/invite_request:
         text: Razão
     errors:
+      attributes:
+        domain:
+          invalid: não é um nome de domínio válido
+      messages:
+        invalid_domain_on_line: "%{value} não é um nome de domínio válido"
       models:
         account:
           attributes:
+            fields:
+              fields_with_values_missing_labels: contém valores sem rótulos
             username:
               invalid: apenas letras, números e underlines ( "_" )
               reserved: já existe
@@ -25,6 +32,12 @@ pt-BR:
           attributes:
             url:
               invalid: não é uma URL válida
+        collection:
+          attributes:
+            collection_items:
+              too_many: é demais, não é permitido mais que %{count}
+            tag:
+              unusable: não pode ser usado
         doorkeeper/application:
           attributes:
             website:
@@ -32,13 +45,24 @@ pt-BR:
         import:
           attributes:
             data:
-              malformed: está incorreto
+              malformed: está mal formado
+        list_account:
+          attributes:
+            account_id:
+              taken: já está na lista
+          must_be_following: deve ser uma conta seguida
         status:
           attributes:
             reblog:
               taken: do toot já existe
+        terms_of_service:
+          attributes:
+            effective_date:
+              too_soon: está muito próxima, deve ser posterior a %{date}
         user:
           attributes:
+            date_of_birth:
+              below_limit: está abaixo do limite de idade
             email:
               blocked: usa provedor de e-mail não permitido
               unreachable: parece não existir
@@ -56,4 +80,4 @@ pt-BR:
         webhook:
           attributes:
             events:
-              invalid_permissions: não pode incluir eventos que você não tem permissão para
+              invalid_permissions: não pode incluir eventos para os quais você não tem permissão

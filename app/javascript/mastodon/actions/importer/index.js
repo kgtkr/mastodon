@@ -1,24 +1,19 @@
-import { normalizeAccount, normalizeStatus, normalizePoll } from './normalizer';
+import { createPollFromServerJSON } from 'mastodon/models/poll';
 
-export const ACCOUNT_IMPORT  = 'ACCOUNT_IMPORT';
-export const ACCOUNTS_IMPORT = 'ACCOUNTS_IMPORT';
+import { importAccounts } from './accounts';
+import { importCustomEmoji } from './emoji';
+import { normalizeStatus } from './normalizer';
+import { importPolls } from './polls';
+import { fetchAccountsForCollectionPreview } from '@/mastodon/reducers/slices/collections';
+
 export const STATUS_IMPORT   = 'STATUS_IMPORT';
 export const STATUSES_IMPORT = 'STATUSES_IMPORT';
-export const POLLS_IMPORT    = 'POLLS_IMPORT';
 export const FILTERS_IMPORT  = 'FILTERS_IMPORT';
 
 function pushUnique(array, object) {
   if (array.every(element => element.id !== object.id)) {
     array.push(object);
   }
-}
-
-export function importAccount(account) {
-  return { type: ACCOUNT_IMPORT, account };
-}
-
-export function importAccounts(accounts) {
-  return { type: ACCOUNTS_IMPORT, accounts };
 }
 
 export function importStatus(status) {
@@ -33,10 +28,6 @@ export function importFilters(filters) {
   return { type: FILTERS_IMPORT, filters };
 }
 
-export function importPolls(polls) {
-  return { type: POLLS_IMPORT, polls };
-}
-
 export function importFetchedAccount(account) {
   return importFetchedAccounts([account]);
 }
@@ -45,57 +36,73 @@ export function importFetchedAccounts(accounts) {
   const normalAccounts = [];
 
   function processAccount(account) {
-    pushUnique(normalAccounts, normalizeAccount(account));
+    pushUnique(normalAccounts, account);
 
     if (account.moved) {
       processAccount(account.moved);
+    }
+
+    if (account.emojis && account.username === account.acct) {
+      importCustomEmoji(account.emojis);
     }
   }
 
   accounts.forEach(processAccount);
 
-  return importAccounts(normalAccounts);
+  return importAccounts({ accounts: normalAccounts });
 }
 
-export function importFetchedStatus(status) {
-  return importFetchedStatuses([status]);
+export function importFetchedStatus(status, options = {}) {
+  return importFetchedStatuses([status], options);
 }
 
-export function importFetchedStatuses(statuses) {
+export function importFetchedStatuses(statuses, options = {}) {
   return (dispatch, getState) => {
     const accounts = [];
     const normalStatuses = [];
     const polls = [];
     const filters = [];
+    const collections = [];
 
     function processStatus(status) {
-      pushUnique(normalStatuses, normalizeStatus(status, getState().getIn(['statuses', status.id])));
+      pushUnique(normalStatuses, normalizeStatus(status, getState().getIn(['statuses', status.id]), options));
       pushUnique(accounts, status.account);
 
       if (status.filtered) {
         status.filtered.forEach(result => pushUnique(filters, result.filter));
       }
 
-      if (status.reblog && status.reblog.id) {
+      if (status.reblog?.id) {
         processStatus(status.reblog);
       }
 
-      if (status.poll && status.poll.id) {
-        pushUnique(polls, normalizePoll(status.poll, getState().getIn(['polls', status.poll.id])));
+      if (status.quote?.quoted_status) {
+        processStatus(status.quote.quoted_status);
+      }
+
+      if (status.poll?.id) {
+        pushUnique(polls, createPollFromServerJSON(status.poll, getState().polls[status.poll.id]));
+      }
+
+      if (status.tagged_collections.length) {
+        status.tagged_collections.forEach(collection => pushUnique(collections, collection));
+      }
+
+      if (status.card) {
+        status.card.authors.forEach(author => author.account && pushUnique(accounts, author.account));
+      }
+
+      if (status.emojis && status.account.username === status.account.acct) {
+        importCustomEmoji(status.emojis);
       }
     }
 
     statuses.forEach(processStatus);
 
-    dispatch(importPolls(polls));
+    dispatch(importPolls({ polls }));
     dispatch(importFetchedAccounts(accounts));
     dispatch(importStatuses(normalStatuses));
     dispatch(importFilters(filters));
-  };
-}
-
-export function importFetchedPoll(poll) {
-  return (dispatch, getState) => {
-    dispatch(importPolls([normalizePoll(poll, getState().getIn(['polls', poll.id]))]));
+    fetchAccountsForCollectionPreview(collections, dispatch);
   };
 }

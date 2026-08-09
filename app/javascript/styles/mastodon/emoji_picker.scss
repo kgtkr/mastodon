@@ -1,7 +1,8 @@
+@use 'variables' as *;
+
 .emoji-mart {
   font-size: 13px;
   display: inline-block;
-  color: $inverted-text-color;
 
   &,
   * {
@@ -15,20 +16,9 @@
 }
 
 .emoji-mart-bar {
-  border: 0 solid darken($ui-secondary-color, 8%);
-
   &:first-child {
-    border-bottom-width: 1px;
-    border-top-left-radius: 5px;
-    border-top-right-radius: 5px;
-    background: $ui-secondary-color;
-  }
-
-  &:last-child {
-    border-top-width: 1px;
-    border-bottom-left-radius: 5px;
-    border-bottom-right-radius: 5px;
-    display: none;
+    background: var(--color-bg-tertiary);
+    border-bottom: 1px solid var(--color-border-primary);
   }
 }
 
@@ -36,7 +26,6 @@
   display: flex;
   justify-content: space-between;
   padding: 0 6px;
-  color: $lighter-text-color;
   line-height: 0;
 }
 
@@ -50,17 +39,22 @@
   cursor: pointer;
   background: transparent;
   border: 0;
+  color: var(--color-text-secondary);
 
   &:hover {
-    color: darken($lighter-text-color, 4%);
+    color: color-mix(
+      in oklab,
+      var(--color-text-primary),
+      var(--color-text-secondary)
+    );
   }
 }
 
 .emoji-mart-anchor-selected {
-  color: $highlight-text-color;
+  color: var(--color-text-brand);
 
   &:hover {
-    color: darken($highlight-text-color, 4%);
+    color: var(--color-text-brand-soft);
   }
 
   .emoji-mart-anchor-bar {
@@ -74,7 +68,7 @@
   inset-inline-start: 0;
   width: 100%;
   height: 4px;
-  background-color: $highlight-text-color;
+  background-color: var(--color-text-brand);
 }
 
 .emoji-mart-anchors {
@@ -95,19 +89,12 @@
   height: 270px;
   max-height: 35vh;
   padding: 0 6px 6px;
-  background: $simple-background-color;
   will-change: transform;
-
-  &::-webkit-scrollbar-track:hover,
-  &::-webkit-scrollbar-track:active {
-    background-color: rgba($base-overlay-background, 0.3);
-  }
 }
 
 .emoji-mart-search {
   padding: 10px;
   padding-inline-end: 45px;
-  background: $simple-background-color;
   position: relative;
 
   input {
@@ -118,19 +105,18 @@
     font-family: inherit;
     display: block;
     width: 100%;
-    background: rgba($ui-secondary-color, 0.3);
-    color: $inverted-text-color;
-    border: 1px solid $ui-secondary-color;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border-primary);
     border-radius: 4px;
 
     &::-moz-focus-inner {
       border: 0;
     }
 
-    &::-moz-focus-inner,
-    &:focus,
-    &:active {
-      outline: 0 !important;
+    &:focus {
+      outline: var(--outline-focus-default);
+      outline-offset: -1px;
     }
 
     &::-webkit-search-cancel-button {
@@ -150,16 +136,16 @@
   transition: all 100ms linear;
   transition-property: opacity;
   pointer-events: auto;
-  opacity: 0.7;
 
   &:disabled {
     cursor: default;
     pointer-events: none;
-    opacity: 0.3;
+    color: var(--color-text-secondary);
   }
 
   svg {
-    fill: $action-button-color;
+    fill: currentColor;
+    opacity: 1 !important;
   }
 }
 
@@ -170,6 +156,9 @@
     z-index: 1;
     position: relative;
     text-align: center;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
   }
 
   &:hover::before {
@@ -180,7 +169,7 @@
     inset-inline-start: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba($ui-secondary-color, 0.7);
+    background-color: var(--color-bg-brand-softest);
     border-radius: 100%;
   }
 }
@@ -197,7 +186,6 @@
     width: 100%;
     font-weight: 500;
     padding: 5px 6px;
-    background: $simple-background-color;
   }
 }
 
@@ -209,7 +197,7 @@
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   border: 0;
 }
 
@@ -241,7 +229,7 @@
 
 .emoji-mart-no-results {
   font-size: 14px;
-  color: $light-text-color;
+  color: var(--color-text-tertiary);
   text-align: center;
   padding: 5px 6px;
   padding-top: 70px;

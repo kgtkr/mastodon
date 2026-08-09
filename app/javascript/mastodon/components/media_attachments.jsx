@@ -15,6 +15,7 @@ export default class MediaAttachments extends ImmutablePureComponent {
     lang: PropTypes.string,
     height: PropTypes.number,
     width: PropTypes.number,
+    visible: PropTypes.bool,
   };
 
   static defaultProps = {
@@ -51,7 +52,7 @@ export default class MediaAttachments extends ImmutablePureComponent {
   };
 
   render () {
-    const { status, width, height } = this.props;
+    const { status, width, height, visible } = this.props;
     const mediaAttachments = status.get('media_attachments');
     const language = status.getIn(['language', 'translation']) || status.get('language') || this.props.lang;
 
@@ -64,7 +65,7 @@ export default class MediaAttachments extends ImmutablePureComponent {
       const description = audio.getIn(['translation', 'description']) || audio.get('description');
 
       return (
-        <Bundle fetchComponent={Audio} loading={this.renderLoadingAudioPlayer} >
+        <Bundle fetchComponent={Audio} loading={this.renderLoadingAudioPlayer} key='audio'>
           {Component => (
             <Component
               src={audio.get('url')}
@@ -86,7 +87,7 @@ export default class MediaAttachments extends ImmutablePureComponent {
       const description = video.getIn(['translation', 'description']) || video.get('description');
 
       return (
-        <Bundle fetchComponent={Video} loading={this.renderLoadingVideoPlayer} >
+        <Bundle fetchComponent={Video} loading={this.renderLoadingVideoPlayer} key='video'>
           {Component => (
             <Component
               preview={video.get('preview_url')}
@@ -99,6 +100,7 @@ export default class MediaAttachments extends ImmutablePureComponent {
               height={height}
               inline
               sensitive={status.get('sensitive')}
+              visible={visible}
               onOpenVideo={noop}
             />
           )}
@@ -106,13 +108,14 @@ export default class MediaAttachments extends ImmutablePureComponent {
       );
     } else {
       return (
-        <Bundle fetchComponent={MediaGallery} loading={this.renderLoadingMediaGallery} >
+        <Bundle fetchComponent={MediaGallery} loading={this.renderLoadingMediaGallery} key='gallery'>
           {Component => (
             <Component
               media={mediaAttachments}
               lang={language}
               sensitive={status.get('sensitive')}
               defaultWidth={width}
+              visible={visible}
               height={height}
               onOpenMedia={noop}
             />

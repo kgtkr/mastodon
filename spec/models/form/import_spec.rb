@@ -30,13 +30,24 @@ RSpec.describe Form::Import do
 
       it 'has errors' do
         subject.validate
-        expect(subject.errors[:data]).to include(I18n.t('imports.errors.over_rows_processing_limit', count: Form::Import::ROWS_PROCESSING_LIMIT))
+        expect(subject.errors[:data]).to include(I18n.t('imports.errors.over_rows_processing_limit', count: described_class::ROWS_PROCESSING_LIMIT))
       end
     end
 
     shared_examples 'valid import' do |type, file|
       let(:import_file) { file }
       let(:import_type) { type }
+
+      it 'passes validation' do
+        expect(subject).to be_valid
+      end
+    end
+
+    describe 'when the import type is custom_filters' do
+      let(:data)        { fixture_file_upload(import_file, content_type) }
+      let(:import_file) { File.open('spec/fixtures/files/custom_filters.json') }
+      let(:import_type) { 'custom_filters' }
+      let(:content_type) { 'application/json' }
 
       it 'passes validation' do
         expect(subject).to be_valid
@@ -61,10 +72,7 @@ RSpec.describe Form::Import do
       let(:import_type) { 'following' }
       let(:import_file) { 'boop.ogg' }
 
-      it 'has errors' do
-        # NOTE: not testing more specific error because we don't know the string to match
-        expect(subject).to model_have_error_on_field(:data)
-      end
+      it { is_expected.to_not allow_value(data).for(:data) }
     end
 
     context 'when importing more follows than allowed' do
@@ -237,66 +245,104 @@ RSpec.describe Form::Import do
       let(:import_file) { file }
       let(:import_mode) { mode }
 
-      before do
-        subject.save
+      before { subject.save }
+
+      context 'with a BulkImport' do
+        let(:bulk_import) { account.bulk_imports.first }
+
+        it 'creates a bulk import with correct values' do
+          expect(bulk_import)
+            .to be_present
+            .and have_attributes(
+              type: eq(subject.type),
+              original_filename: eq(subject.data.original_filename),
+              likely_mismatched?: eq(subject.likely_mismatched?),
+              overwrite?: eq(!!subject.overwrite), # rubocop:disable Style/DoubleNegation
+              processed_items: eq(0),
+              imported_items: eq(0),
+              total_items: eq(bulk_import.rows.count),
+              state_unconfirmed?: be(true)
+            )
+          expect(bulk_import.rows.pluck(:data))
+            .to match_array(expected_rows)
+        end
+      end
+    end
+
+    describe 'when importing json' do
+      let(:import_type) { 'custom_filters' }
+      let(:data) { fixture_file_upload('custom_filters.json', 'application/json') }
+      let(:import_mode) { 'merge' }
+      let(:expected_rows) do
+        [
+          {
+            'title' => 'dfjswa',
+            'expires_at' => nil,
+            'context' => ['home'],
+            'action' => 'warn',
+            'keywords_attributes' => [{ 'keyword' => 'dvshja', 'whole_word' => true }],
+            'statuses' => [],
+          },
+          {
+            'title' => 'filter with a phrase as title',
+            'expires_at' => nil,
+            'context' => %w(home notifications public),
+            'action' => 'warn',
+            'keywords_attributes' => [
+              { 'keyword' => "more words let's see ", 'whole_word' => true },
+            ],
+            'statuses' => [],
+          },
+          {
+            'title' => 'how do I add a status to a filter?',
+            'expires_at' => nil,
+            'context' => ['public', 'account'],
+            'action' => 'warn',
+            'keywords_attributes' => [
+              { 'keyword' => 'something something', 'whole_word' => true },
+            ],
+            'statuses' => [],
+          },
+        ]
       end
 
-      it 'creates the expected rows' do
-        expect(account.bulk_imports.first.rows.pluck(:data)).to match_array(expected_rows)
+      before do
+        subject.save
       end
 
       context 'with a BulkImport' do
         let(:bulk_import) { account.bulk_imports.first }
 
-        it 'creates a non-nil bulk import' do
-          expect(bulk_import).to_not be_nil
-        end
-
-        it 'matches the subjects type' do
-          expect(bulk_import.type.to_sym).to eq subject.type.to_sym
-        end
-
-        it 'matches the subjects original filename' do
-          expect(bulk_import.original_filename).to eq subject.data.original_filename
-        end
-
-        it 'matches the subjects likely_mismatched? value' do
-          expect(bulk_import.likely_mismatched?).to eq subject.likely_mismatched?
-        end
-
-        it 'matches the subject overwrite value' do
-          expect(bulk_import.overwrite?).to eq !!subject.overwrite # rubocop:disable Style/DoubleNegation
-        end
-
-        it 'has zero processed items' do
-          expect(bulk_import.processed_items).to eq 0
-        end
-
-        it 'has zero imported items' do
-          expect(bulk_import.imported_items).to eq 0
-        end
-
-        it 'has a correct total_items value' do
-          expect(bulk_import.total_items).to eq bulk_import.rows.count
-        end
-
-        it 'defaults to unconfirmed true' do
-          expect(bulk_import.unconfirmed?).to be true
+        it 'creates a bulk import with correct values' do
+          expect(bulk_import)
+            .to be_present
+            .and have_attributes(
+              type: eq(subject.type),
+              original_filename: eq(subject.data.original_filename),
+              likely_mismatched?: eq(subject.likely_mismatched_json?),
+              overwrite?: eq(!!subject.overwrite), # rubocop:disable Style/DoubleNegation
+              processed_items: eq(0),
+              imported_items: eq(0),
+              total_items: eq(bulk_import.rows.count),
+              state_unconfirmed?: be(true)
+            )
+          expect(bulk_import.rows.pluck(:data))
+            .to match_array(expected_rows)
         end
       end
     end
 
-    it_behaves_like 'on successful import', 'following', 'merge', 'imports.txt', (%w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
-    it_behaves_like 'on successful import', 'following', 'overwrite', 'imports.txt', (%w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
-    it_behaves_like 'on successful import', 'blocking', 'merge', 'imports.txt', (%w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
-    it_behaves_like 'on successful import', 'blocking', 'overwrite', 'imports.txt', (%w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
-    it_behaves_like 'on successful import', 'muting', 'merge', 'imports.txt', (%w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
-    it_behaves_like 'on successful import', 'domain_blocking', 'merge', 'domain_blocks.csv', (%w(bad.domain worse.domain reject.media).map { |domain| { 'domain' => domain } })
-    it_behaves_like 'on successful import', 'bookmarks', 'merge', 'bookmark-imports.txt', (%w(https://example.com/statuses/1312 https://local.com/users/foo/statuses/42 https://unknown-remote.com/users/bar/statuses/1 https://example.com/statuses/direct).map { |uri| { 'uri' => uri } })
+    it_behaves_like('on successful import', 'following', 'merge', 'imports.txt', %w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
+    it_behaves_like('on successful import', 'following', 'overwrite', 'imports.txt', %w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
+    it_behaves_like('on successful import', 'blocking', 'merge', 'imports.txt', %w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
+    it_behaves_like('on successful import', 'blocking', 'overwrite', 'imports.txt', %w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
+    it_behaves_like('on successful import', 'muting', 'merge', 'imports.txt', %w(user@example.com user@test.com).map { |acct| { 'acct' => acct } })
+    it_behaves_like('on successful import', 'domain_blocking', 'merge', 'domain_blocks.csv', %w(bad.domain worse.domain reject.media).map { |domain| { 'domain' => domain } })
+    it_behaves_like('on successful import', 'bookmarks', 'merge', 'bookmark-imports.txt', %w(https://example.com/statuses/1312 https://local.com/users/foo/statuses/42 https://unknown-remote.com/users/bar/statuses/1 https://example.com/statuses/direct).map { |uri| { 'uri' => uri } })
 
     it_behaves_like 'on successful import', 'following', 'merge', 'following_accounts.csv', [
       { 'acct' => 'user@example.com', 'show_reblogs' => true, 'notify' => false, 'languages' => nil },
-      { 'acct' => 'user@test.com', 'show_reblogs' => true, 'notify' => true, 'languages' => ['en', 'fr'] },
+      { 'acct' => 'user@test.com', 'show_reblogs' => true, 'notify' => true, 'languages' => %w(en fr) },
     ]
 
     it_behaves_like 'on successful import', 'muting', 'merge', 'muted_accounts.csv', [

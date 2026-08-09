@@ -103,13 +103,11 @@ module Mastodon::CLI
     end
 
     def upgrade_storage_fog(_progress, _attachment, _style)
-      say('The fog storage driver is not supported for this operation at this time', :red)
-      exit(1)
+      fail_with_message 'The fog storage driver is not supported for this operation at this time'
     end
 
     def upgrade_storage_azure(_progress, _attachment, _style)
-      say('The azure storage driver is not supported for this operation at this time', :red)
-      exit(1)
+      fail_with_message 'The azure storage driver is not supported for this operation at this time'
     end
 
     def upgrade_storage_filesystem(progress, attachment, style)
@@ -125,12 +123,12 @@ module Mastodon::CLI
         progress.log("Moving #{previous_path} to #{upgraded_path}") if options[:verbose]
 
         begin
-          move_previous_to_upgraded
+          move_previous_to_upgraded(previous_path, upgraded_path)
         rescue => e
           progress.log(pastel.red("Error processing #{previous_path}: #{e}"))
           success = false
 
-          remove_directory
+          remove_directory(upgraded_path)
         end
       end
 

@@ -2,15 +2,16 @@
 
 require 'rails_helper'
 
-RSpec.describe FanOutOnWriteService, type: :service do
+RSpec.describe FanOutOnWriteService do
   subject { described_class.new }
 
   let(:last_active_at) { Time.now.utc }
-  let(:status) { Fabricate(:status, account: alice, visibility: visibility, text: 'Hello @bob #hoge') }
+  let(:status) { Fabricate(:status, account: alice, visibility: visibility, text: 'Hello @bob @eve #hoge') }
 
   let!(:alice) { Fabricate(:user, current_sign_in_at: last_active_at).account }
   let!(:bob)   { Fabricate(:user, current_sign_in_at: last_active_at, account_attributes: { username: 'bob' }).account }
   let!(:tom)   { Fabricate(:user, current_sign_in_at: last_active_at).account }
+  let!(:eve)   { Fabricate(:user, current_sign_in_at: last_active_at, account_attributes: { username: 'eve' }).account }
 
   before do
     bob.follow!(alice)
@@ -19,95 +20,133 @@ RSpec.describe FanOutOnWriteService, type: :service do
     ProcessMentionsService.new.call(status)
     ProcessHashtagsService.new.call(status)
 
-    allow(redis).to receive(:publish)
+    Fabricate(:media_attachment, status: status, account: alice)
 
-    subject.call(status)
+    allow(redis).to receive(:publish)
   end
 
   def home_feed_of(account)
     HomeFeed.new(account).get(10).map(&:id)
   end
 
+  context 'when status account is suspended' do
+    let(:visibility) { 'public' }
+
+    before { alice.suspend! }
+
+    it 'does not execute or broadcast' do
+      expect(subject.call(status))
+        .to be_nil
+      expect_no_broadcasting
+    end
+  end
+
   context 'when status is public' do
     let(:visibility) { 'public' }
 
-    it 'is added to the home feed of its author' do
-      expect(home_feed_of(alice)).to include status.id
+    it 'adds status to home feed of author and followers and broadcasts', :inline_jobs do
+      expect { subject.call(status) }
+        .to change(bob.notifications, :count).by(1)
+        .and change(eve.notifications, :count).by(1)
+
+      expect(status.id)
+        .to be_in(home_feed_of(alice))
+        .and be_in(home_feed_of(bob))
+        .and be_in(home_feed_of(tom))
+
+      expected_payload = { event: 'update', payload: include(id: status.id.to_s, created_at: status.created_at.iso8601(3), content: /<p>Hello/) }
+
+      expect(redis)
+        .to have_received(:publish).with('timeline:hashtag:hoge', match_json_values(expected_payload))
+      expect(redis)
+        .to have_received(:publish).with('timeline:hashtag:hoge:local', match_json_values(expected_payload))
+      expect(redis)
+        .to have_received(:publish).with('timeline:public', match_json_values(expected_payload))
+      expect(redis)
+        .to have_received(:publish).with('timeline:public:local', match_json_values(expected_payload))
+      expect(redis)
+        .to have_received(:publish).with('timeline:public:media', match_json_values(expected_payload))
     end
 
-    it 'is added to the home feed of a follower' do
-      expect(home_feed_of(bob)).to include status.id
-      expect(home_feed_of(tom)).to include status.id
-    end
-
-    it 'is broadcast to the hashtag stream' do
-      expect(redis).to have_received(:publish).with('timeline:hashtag:hoge', anything)
-      expect(redis).to have_received(:publish).with('timeline:hashtag:hoge:local', anything)
-    end
-
-    it 'is broadcast to the public stream' do
-      expect(redis).to have_received(:publish).with('timeline:public', anything)
-      expect(redis).to have_received(:publish).with('timeline:public:local', anything)
+    context 'with silenced_account_ids' do
+      it 'calls LocalNotificationWorker with the expected arguments' do
+        expect { subject.call(status, silenced_account_ids: [eve.id]) }
+          .to enqueue_sidekiq_job(LocalNotificationWorker).with(bob.id, anything, 'Mention', 'mention')
+          .and enqueue_sidekiq_job(LocalNotificationWorker).with(eve.id, anything, 'Mention', 'mention', { 'silenced' => true })
+      end
     end
   end
 
   context 'when status is limited' do
     let(:visibility) { 'limited' }
 
-    it 'is added to the home feed of its author' do
-      expect(home_feed_of(alice)).to include status.id
-    end
+    it 'adds status to home feed of author and mentioned followers and does not broadcast', :inline_jobs do
+      subject.call(status)
 
-    it 'is added to the home feed of the mentioned follower' do
-      expect(home_feed_of(bob)).to include status.id
-    end
+      expect(status.id)
+        .to be_in(home_feed_of(alice))
+        .and be_in(home_feed_of(bob))
+      expect(status.id)
+        .to_not be_in(home_feed_of(tom))
 
-    it 'is not added to the home feed of the other follower' do
-      expect(home_feed_of(tom)).to_not include status.id
-    end
-
-    it 'is not broadcast publicly' do
-      expect(redis).to_not have_received(:publish).with('timeline:hashtag:hoge', anything)
-      expect(redis).to_not have_received(:publish).with('timeline:public', anything)
+      expect_no_broadcasting
     end
   end
 
   context 'when status is private' do
     let(:visibility) { 'private' }
 
-    it 'is added to the home feed of its author' do
-      expect(home_feed_of(alice)).to include status.id
-    end
+    it 'adds status to home feed of author and followers and does not broadcast', :inline_jobs do
+      subject.call(status)
 
-    it 'is added to the home feed of a follower' do
-      expect(home_feed_of(bob)).to include status.id
-      expect(home_feed_of(tom)).to include status.id
-    end
+      expect(status.id)
+        .to be_in(home_feed_of(alice))
+        .and be_in(home_feed_of(bob))
+        .and be_in(home_feed_of(tom))
 
-    it 'is not broadcast publicly' do
-      expect(redis).to_not have_received(:publish).with('timeline:hashtag:hoge', anything)
-      expect(redis).to_not have_received(:publish).with('timeline:public', anything)
+      expect_no_broadcasting
     end
   end
 
   context 'when status is direct' do
     let(:visibility) { 'direct' }
 
-    it 'is added to the home feed of its author' do
-      expect(home_feed_of(alice)).to include status.id
+    it 'is added to the home feed of its author and mentioned followers and does not broadcast', :inline_jobs do
+      subject.call(status)
+
+      expect(status.id)
+        .to be_in(home_feed_of(alice))
+        .and be_in(home_feed_of(bob))
+      expect(status.id)
+        .to_not be_in(home_feed_of(tom))
+
+      expect_no_broadcasting
     end
 
-    it 'is added to the home feed of the mentioned follower' do
-      expect(home_feed_of(bob)).to include status.id
-    end
+    context 'when handling status updates' do
+      before do
+        subject.call(status)
 
-    it 'is not added to the home feed of the other follower' do
-      expect(home_feed_of(tom)).to_not include status.id
-    end
+        status.snapshot!(at_time: status.created_at, rate_limit: false)
+        status.update!(text: 'Hello @bob @eve #hoge (edited)')
+        status.snapshot!(account_id: status.account_id)
 
-    it 'is not broadcast publicly' do
-      expect(redis).to_not have_received(:publish).with('timeline:hashtag:hoge', anything)
-      expect(redis).to_not have_received(:publish).with('timeline:public', anything)
+        redis.set("subscribed:timeline:#{eve.id}:notifications", '1')
+      end
+
+      it 'pushes the update to mentioned users through the notifications streaming channel' do
+        subject.call(status, update: true)
+        expect(PushUpdateWorker).to have_enqueued_sidekiq_job(anything, status.id, "timeline:#{eve.id}:notifications", { 'update' => true })
+      end
     end
+  end
+
+  def expect_no_broadcasting
+    expect(redis)
+      .to_not have_received(:publish)
+      .with('timeline:hashtag:hoge', anything)
+    expect(redis)
+      .to_not have_received(:publish)
+      .with('timeline:public', anything)
   end
 end
