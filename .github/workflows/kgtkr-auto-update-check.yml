@@ -10,6 +10,9 @@ on:
         description: 'Mastodon version'
         required: false
 
+env:
+  GEMINI_CLI_TRUST_WORKSPACE: "true"
+
 jobs:
   check-and-create-pr:
     runs-on: ubuntu-latest
@@ -27,9 +30,7 @@ jobs:
         with:
           node-version: 20
 
-      - uses: google-github-actions/run-gemini-cli@v0
-        with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+      - run: npm install -g @google/gemini-cli
 
       - id: detect
         run: |
@@ -63,6 +64,7 @@ jobs:
       - if: steps.detect.outputs.skip != 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
         run: |
           VERSION="${{ steps.detect.outputs.version }}"
           BRANCH_NAME="update/v$VERSION"
@@ -80,7 +82,7 @@ jobs:
               PROMPT="${PROMPT_TEMPLATE//\{\{AGENTS_RULES\}\}/$AGENTS_RULES}"
               PROMPT="${PROMPT//\{\{FILE\}\}/$file}"
 
-              gemini prompt "$PROMPT" --file "$file" > "$file.tmp"
+              gemini --skip-trust prompt "$PROMPT" --file "$file" > "$file.tmp"
               if [ -s "$file.tmp" ]; then
                 mv "$file.tmp" "$file"
                 git add "$file"
