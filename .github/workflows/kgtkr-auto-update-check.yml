@@ -101,6 +101,7 @@ jobs:
           BRANCH_NAME="update/v$VERSION"
 
           gh pr create \
+            --repo ${{ github.repository }} \
             --title "Update to Mastodon v$VERSION" \
             --body "Automated update to Mastodon v$VERSION." \
             --base kgtkr-master \
