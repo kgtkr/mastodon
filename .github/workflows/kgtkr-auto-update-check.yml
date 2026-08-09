@@ -73,14 +73,8 @@ jobs:
 
           CONFLICT_FILES=$(git diff --name-only --diff-filter=U || true)
           if [ -n "$CONFLICT_FILES" ]; then
-            AGENTS_RULES=""
-            [ -f ".agents/AGENTS.md" ] && AGENTS_RULES=$(cat .agents/AGENTS.md)
-            PROMPT_TEMPLATE=$(cat .github/prompts/resolve-conflict.txt)
-
             for file in $CONFLICT_FILES; do
-              PROMPT="${PROMPT_TEMPLATE//\{\{AGENTS_RULES\}\}/$AGENTS_RULES}"
-              PROMPT="${PROMPT//\{\{FILE\}\}/$file}"
-
+              PROMPT=$(./kgtkr-scripts/generate-resolve-conflict-prompt.sh "$file")
               cat "$file" | gemini --skip-trust -p "$PROMPT" > "$file.tmp"
               if [ -s "$file.tmp" ]; then
                 mv "$file.tmp" "$file"
@@ -106,9 +100,11 @@ jobs:
           VERSION="${{ steps.detect.outputs.version }}"
           BRANCH_NAME="kgtkr/update/v$VERSION"
 
+          ./kgtkr-scripts/generate-pr-body.sh "$VERSION" pr_body.txt
+
           gh pr create \
             --repo ${{ github.repository }} \
             --title "Update to Mastodon v$VERSION" \
-            --body "Automated update to Mastodon v$VERSION." \
+            --body-file pr_body.txt \
             --base kgtkr-master \
             --head "$BRANCH_NAME"
