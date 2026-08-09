@@ -81,7 +81,7 @@ jobs:
               PROMPT="${PROMPT_TEMPLATE//\{\{AGENTS_RULES\}\}/$AGENTS_RULES}"
               PROMPT="${PROMPT//\{\{FILE\}\}/$file}"
 
-              gemini --skip-trust prompt "$PROMPT" --file "$file" > "$file.tmp"
+              cat "$file" | gemini --skip-trust -p "$PROMPT" > "$file.tmp"
               if [ -s "$file.tmp" ]; then
                 mv "$file.tmp" "$file"
                 git add "$file"
