@@ -16,6 +16,9 @@ env:
 jobs:
   check-and-create-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,7 +96,9 @@ jobs:
           echo "has_commits=true" >> $GITHUB_OUTPUT
           git push origin "$BRANCH_NAME"
 
-      - if: steps.detect.outputs.skip != 'true' && steps.update.outputs.has_commits == 'true'
+      # GITHUB_TOKEN で作成した PR は後続のワークフローをトリガーしないためPATを使う
+      - id: create-pr
+        if: steps.detect.outputs.skip != 'true' && steps.update.outputs.has_commits == 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
@@ -102,9 +107,20 @@ jobs:
 
           ./kgtkr-scripts/generate-pr-body.sh "$VERSION" pr_body.txt
 
-          gh pr create \
+          PR_URL=$(gh pr create \
             --repo ${{ github.repository }} \
             --title "Update to Mastodon v$VERSION" \
             --body-file pr_body.txt \
             --base kgtkr-master \
-            --head "$BRANCH_NAME"
+            --head "$BRANCH_NAME")
+
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+
+      # PAT で作成した PR は PAT の所有者自身に通知が届かないため、GITHUB_TOKEN を使用してメンションコメントを投稿
+      - id: comment-pr
+        if: steps.detect.outputs.skip != 'true' && steps.update.outputs.has_commits == 'true' && steps.create-pr.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ steps.create-pr.outputs.pr_url }}" \
+            --body "@${{ github.repository_owner }} Update PR has been created: v${{ steps.detect.outputs.version }}"
