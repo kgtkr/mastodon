@@ -6,53 +6,45 @@ class NotificationMailer < ApplicationMailer
          :routing
 
   before_action :process_params
-  before_action :set_status, only: [:mention, :favourite, :reblog]
+  with_options only: %i(mention favourite reblog quote) do
+    before_action :set_status
+    after_action :thread_by_conversation!
+  end
   before_action :set_account, only: [:follow, :favourite, :reblog, :follow_request]
   after_action :set_list_headers!
 
+  before_deliver :verify_functional_user
+
+  around_action :set_locale
+
   default to: -> { email_address_with_name(@user.email, @me.username) }
 
-  def mention
-    return unless @user.functional? && @status.present?
+  rescue_from(ActiveRecord::RecordNotFound) { false }
 
-    locale_for_account(@me) do
-      thread_by_conversation(@status.conversation)
-      mail subject: default_i18n_subject(name: @status.account.acct)
-    end
+  layout 'mailer'
+
+  def mention
+    mail subject: default_i18n_subject(name: @status.account.acct)
+  end
+
+  def quote
+    mail subject: default_i18n_subject(name: @status.account.acct)
   end
 
   def follow
-    return unless @user.functional?
-
-    locale_for_account(@me) do
-      mail subject: default_i18n_subject(name: @account.acct)
-    end
+    mail subject: default_i18n_subject(name: @account.acct)
   end
 
   def favourite
-    return unless @user.functional? && @status.present?
-
-    locale_for_account(@me) do
-      thread_by_conversation(@status.conversation)
-      mail subject: default_i18n_subject(name: @account.acct)
-    end
+    mail subject: default_i18n_subject(name: @account.acct)
   end
 
   def reblog
-    return unless @user.functional? && @status.present?
-
-    locale_for_account(@me) do
-      thread_by_conversation(@status.conversation)
-      mail subject: default_i18n_subject(name: @account.acct)
-    end
+    mail subject: default_i18n_subject(name: @account.acct)
   end
 
   def follow_request
-    return unless @user.functional?
-
-    locale_for_account(@me) do
-      mail subject: default_i18n_subject(name: @account.acct)
-    end
+    mail subject: default_i18n_subject(name: @account.acct)
   end
 
   private
@@ -66,25 +58,37 @@ class NotificationMailer < ApplicationMailer
   end
 
   def set_status
-    @status = @notification.target_status
+    @status = @notification.target_status || raise(ActiveRecord::RecordNotFound)
   end
 
   def set_account
     @account = @notification.from_account
   end
 
-  def set_list_headers!
-    headers['List-ID'] = "<#{@type}.#{@me.username}.#{Rails.configuration.x.local_domain}>"
-    headers['List-Unsubscribe'] = "<#{@unsubscribe_url}>"
-    headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+  def set_locale(&block)
+    locale_for_account(@me, &block)
   end
 
-  def thread_by_conversation(conversation)
-    return if conversation.nil?
+  def verify_functional_user
+    throw(:abort) unless @user.functional?
+  end
 
-    msg_id = "<conversation-#{conversation.id}.#{conversation.created_at.strftime('%Y-%m-%d')}@#{Rails.configuration.x.local_domain}>"
+  def set_list_headers!
+    headers(
+      'List-ID' => "<#{@type}.#{@me.username}.#{Rails.configuration.x.local_domain}>",
+      'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click',
+      'List-Unsubscribe' => "<#{@unsubscribe_url}>"
+    )
+  end
 
-    headers['In-Reply-To'] = msg_id
-    headers['References']  = msg_id
+  def thread_by_conversation!
+    return if @status&.conversation.nil?
+
+    conversation_message_id = "<conversation-#{@status.conversation.id}.#{@status.conversation.created_at.to_date}@#{Rails.configuration.x.local_domain}>"
+
+    headers(
+      'In-Reply-To' => conversation_message_id,
+      'References' => conversation_message_id
+    )
   end
 end

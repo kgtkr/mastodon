@@ -27,12 +27,12 @@ class Admin::Metrics::Measure::NewUsersMeasure < Admin::Metrics::Measure::BaseMe
         WITH new_users AS (
           SELECT users.id
           FROM users
-          WHERE date_trunc('day', users.created_at)::date = axis.period
+          WHERE users.account_id >= (date_part('epoch', date_trunc('day', axis.period)::date) * 1000)::bigint << 16 AND users.account_id < ((date_part('epoch', date_trunc('day', axis.period)::date + ('1 day')::interval)) * 1000)::bigint << 16
         )
         SELECT count(*) FROM new_users
       ) AS value
       FROM (
-        SELECT generate_series(date_trunc('day', :start_at::timestamp)::date, date_trunc('day', :end_at::timestamp)::date, interval '1 day') AS period
+        #{generated_series_days}
       ) AS axis
     SQL
   end

@@ -19,7 +19,7 @@ class VoteService < BaseService
     already_voted = true
 
     with_redis_lock("vote:#{@poll.id}:#{@account.id}") do
-      already_voted = @poll.votes.where(account: @account).exists?
+      already_voted = @poll.votes.exists?(account: @account)
 
       ApplicationRecord.transaction do
         @choices.each do |choice|
@@ -65,7 +65,7 @@ class VoteService < BaseService
   end
 
   def build_json(vote)
-    Oj.dump(serialize_payload(vote, ActivityPub::VoteSerializer))
+    serialize_payload(vote, ActivityPub::VoteSerializer).to_json
   end
 
   def increment_voters_count!

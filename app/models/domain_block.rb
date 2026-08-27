@@ -6,14 +6,14 @@
 #
 #  id              :bigint(8)        not null, primary key
 #  domain          :string           default(""), not null
-#  created_at      :datetime         not null
-#  updated_at      :datetime         not null
-#  severity        :integer          default("silence")
-#  reject_media    :boolean          default(FALSE), not null
-#  reject_reports  :boolean          default(FALSE), not null
+#  obfuscate       :boolean          default(FALSE), not null
 #  private_comment :text
 #  public_comment  :text
-#  obfuscate       :boolean          default(FALSE), not null
+#  reject_media    :boolean          default(FALSE), not null
+#  reject_reports  :boolean          default(FALSE), not null
+#  severity        :integer          default("silence")
+#  created_at      :datetime         not null
+#  updated_at      :datetime         not null
 #
 
 class DomainBlock < ApplicationRecord
@@ -21,17 +21,16 @@ class DomainBlock < ApplicationRecord
   include DomainNormalizable
   include DomainMaterializable
 
-  enum severity: { silence: 0, suspend: 1, noop: 2 }
+  enum :severity, { silence: 0, suspend: 1, noop: 2 }, validate: true
 
   validates :domain, presence: true, uniqueness: true, domain: true
 
-  has_many :accounts, foreign_key: :domain, primary_key: :domain, inverse_of: false
+  has_many :accounts, foreign_key: :domain, primary_key: :domain, inverse_of: false, dependent: nil
   delegate :count, to: :accounts, prefix: true
 
-  scope :matches_domain, ->(value) { where(arel_table[:domain].matches("%#{value}%")) }
   scope :with_user_facing_limitations, -> { where(severity: [:silence, :suspend]) }
   scope :with_limitations, -> { where(severity: [:silence, :suspend]).or(where(reject_media: true)) }
-  scope :by_severity, -> { order(Arel.sql('(CASE severity WHEN 0 THEN 1 WHEN 1 THEN 2 WHEN 2 THEN 0 END), domain')) }
+  scope :by_severity, -> { in_order_of(:severity, %w(noop silence suspend)).order(:domain) }
 
   def to_log_human_identifier
     domain
@@ -41,7 +40,9 @@ class DomainBlock < ApplicationRecord
     if suspend?
       [:suspend]
     else
-      [severity.to_sym, reject_media? ? :reject_media : nil, reject_reports? ? :reject_reports : nil].reject { |policy| policy == :noop || policy.nil? }
+      [severity.to_sym, reject_media? ? :reject_media : nil, reject_reports? ? :reject_reports : nil]
+        .reject { |policy| policy == :noop }
+        .compact
     end
   end
 
@@ -68,10 +69,8 @@ class DomainBlock < ApplicationRecord
       return if domain.blank?
 
       uri      = Addressable::URI.new.tap { |u| u.host = domain.strip.delete('/') }
-      segments = uri.normalized_host.split('.')
-      variants = segments.map.with_index { |_, i| segments[i..].join('.') }
-
-      where(domain: variants).order(Arel.sql('char_length(domain) desc')).first
+      variants = domain_variants(uri.normalized_host)
+      where(domain: variants).by_domain_length.first
     rescue Addressable::URI::InvalidURIError, IDN::Idna::IdnaError
       nil
     end
@@ -83,11 +82,6 @@ class DomainBlock < ApplicationRecord
     return false if other_block.silence? && noop?
 
     (reject_media || !other_block.reject_media) && (reject_reports || !other_block.reject_reports)
-  end
-
-  def affected_accounts_count
-    scope = suspend? ? accounts.where(suspended_at: created_at) : accounts.where(silenced_at: created_at)
-    scope.count
   end
 
   def public_domain

@@ -6,11 +6,13 @@ class Webfinger
   class RedirectError < Error; end
 
   class Response
+    ACTIVITYPUB_READY_TYPE = ['application/activity+json', 'application/ld+json; profile="https://www.w3.org/ns/activitystreams"'].freeze
+
     attr_reader :uri
 
     def initialize(uri, body)
       @uri  = uri
-      @json = Oj.load(body, mode: :strict)
+      @json = JSON.parse(body)
 
       validate_response!
     end
@@ -20,17 +22,28 @@ class Webfinger
     end
 
     def link(rel, attribute)
-      links.dig(rel, attribute)
+      links.dig(rel, 0, attribute)
+    end
+
+    def self_link_href
+      self_link.fetch('href')
     end
 
     private
 
     def links
-      @links ||= @json['links'].index_by { |link| link['rel'] }
+      @links ||= @json.fetch('links', []).group_by { |link| link['rel'] }
+    end
+
+    def self_link
+      links.fetch('self', []).find do |link|
+        ACTIVITYPUB_READY_TYPE.include?(link['type'])
+      end
     end
 
     def validate_response!
       raise Webfinger::Error, "Missing subject in response for #{@uri}" if subject.blank?
+      raise Webfinger::Error, "Missing self link in response for #{@uri}" if self_link.blank?
     end
   end
 
@@ -44,15 +57,17 @@ class Webfinger
 
   def perform
     Response.new(@uri, body_from_webfinger)
-  rescue Oj::ParseError
+  rescue JSON::ParserError
     raise Webfinger::Error, "Invalid JSON in response for #{@uri}"
   rescue Addressable::URI::InvalidURIError
     raise Webfinger::Error, "Invalid URI for #{@uri}"
+  rescue *Mastodon::HTTP_CONNECTION_ERRORS => e
+    raise Webfinger::Error, "Error performing webfinger query for #{@uri}: #{e}"
   end
 
   private
 
-  def body_from_webfinger(url = standard_url, use_fallback = true)
+  def body_from_webfinger(url = standard_url, use_fallback: true)
     webfinger_request(url).perform do |res|
       if res.code == 200
         body = res.body_with_limit
@@ -71,22 +86,18 @@ class Webfinger
 
   def body_from_host_meta
     host_meta_request.perform do |res|
-      if res.code == 200
-        body_from_webfinger(url_from_template(res.body_with_limit), false)
-      else
-        raise Webfinger::Error, "Request for #{@uri} returned HTTP #{res.code}"
-      end
+      raise Webfinger::Error, "Request for #{@uri} returned HTTP #{res.code}" unless res.code == 200
+
+      body_from_webfinger(url_from_template(res.body_with_limit), use_fallback: false)
     end
   end
 
   def url_from_template(str)
     link = Nokogiri::XML(str).at_xpath('//xmlns:Link[@rel="lrdd"]')
 
-    if link.present?
-      link['template'].gsub('{uri}', @uri)
-    else
-      raise Webfinger::Error, "Request for #{@uri} returned host-meta without link to Webfinger"
-    end
+    raise Webfinger::Error, "Request for #{@uri} returned host-meta without link to Webfinger" if link.blank?
+
+    link['template'].gsub('{uri}', @uri)
   rescue Nokogiri::XML::XPath::SyntaxError
     raise Webfinger::Error, "Invalid XML encountered in host-meta for #{@uri}"
   end

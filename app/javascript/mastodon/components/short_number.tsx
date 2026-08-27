@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import type { JSX } from 'react';
 
 import { FormattedMessage, FormattedNumber } from 'react-intl';
 
@@ -48,8 +49,9 @@ const ShortNumberCounter: React.FC<ShortNumberCounterProps> = ({ value }) => {
 
   const count = (
     <FormattedNumber
-      value={rawNumber}
+      value={rawNumber ?? 0}
       maximumFractionDigits={maxFractionDigits}
+      roundingMode='trunc'
     />
   );
 

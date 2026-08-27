@@ -62,7 +62,9 @@ module Mastodon::CLI
             failed += 1
             say('Failure/Error: ', :red)
             say(entry.full_name)
-            say("    #{custom_emoji.errors[:image].join(', ')}", :red)
+            shell.indent(2) do
+              say(custom_emoji.errors[:image].join(', '), :red)
+            end
           end
         end
       end
@@ -86,14 +88,8 @@ module Mastodon::CLI
       category         = CustomEmojiCategory.find_by(name: options[:category])
       export_file_name = File.join(path, 'export.tar.gz')
 
-      if File.file?(export_file_name) && !options[:overwrite]
-        say("Archive already exists! Use '--overwrite' to overwrite it!")
-        exit 1
-      end
-      if category.nil? && options[:category]
-        say("Unable to find category '#{options[:category]}'!")
-        exit 1
-      end
+      fail_with_message "Archive already exists! Use '--overwrite' to overwrite it!" if File.file?(export_file_name) && !options[:overwrite]
+      fail_with_message "Unable to find category '#{options[:category]}'!" if category.nil? && options[:category]
 
       File.open(export_file_name, 'wb') do |file|
         Zlib::GzipWriter.wrap(file) do |gzip|
@@ -113,15 +109,27 @@ module Mastodon::CLI
     end
 
     option :remote_only, type: :boolean
+    option :suspended_only, type: :boolean
     desc 'purge', 'Remove all custom emoji'
     long_desc <<-LONG_DESC
       Removes all custom emoji.
 
       With the --remote-only option, only remote emoji will be deleted.
+
+      With the --suspended-only option, only emoji from suspended servers will be deleted.
     LONG_DESC
     def purge
-      scope = options[:remote_only] ? CustomEmoji.remote : CustomEmoji
-      scope.in_batches.destroy_all
+      if options[:suspended_only]
+        DomainBlock.where(severity: :suspend).find_each do |domain_block|
+          CustomEmoji.by_domain_and_subdomains(domain_block.domain).find_in_batches do |custom_emojis|
+            AttachmentBatch.new(CustomEmoji, custom_emojis).delete
+          end
+        end
+      else
+        scope = options[:remote_only] ? CustomEmoji.remote : CustomEmoji
+        scope.in_batches.destroy_all
+      end
+
       say('OK', :green)
     end
 

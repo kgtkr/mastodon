@@ -1,9 +1,10 @@
 name: JavaScript Testing
 on:
+  merge_group:
   push:
-    branches-ignore:
-      - 'dependabot/**'
-      - 'renovate/**'
+    branches:
+      - 'main'
+      - 'stable-*'
     paths:
       - 'package.json'
       - 'yarn.lock'
@@ -30,19 +31,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Clone repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          cache: yarn
-          node-version-file: '.nvmrc'
+      - name: Set up Javascript environment
+        uses: ./.github/actions/setup-javascript
 
-      - name: Install all yarn packages
-        run: yarn --frozen-lockfile
-
-      - name: Jest testing
-        run: yarn jest --reporters github-actions summary
+      - name: JavaScript testing
+        run: yarn test:js

@@ -25,7 +25,7 @@ class FetchOEmbedService
     return if html.nil?
 
     @format = @options[:format]
-    page    = Nokogiri::HTML(html)
+    page    = Nokogiri::HTML5(html)
 
     if @format.nil? || @format == :json
       @endpoint_url ||= page.at_xpath('//link[@type="application/json+oembed"]|//link[@type="text/json+oembed"]')&.attribute('href')&.value
@@ -86,21 +86,21 @@ class FetchOEmbedService
     end
 
     validate(parse_for_format(body)) if body.present?
-  rescue Oj::ParseError, Ox::ParseError
+  rescue JSON::ParserError, Ox::ParseError
     nil
   end
 
   def parse_for_format(body)
     case @format
     when :json
-      Oj.load(body, mode: :strict)&.with_indifferent_access
+      JSON.parse(body)&.with_indifferent_access
     when :xml
       Ox.load(body, mode: :hash_no_attrs)&.with_indifferent_access&.dig(:oembed)
     end
   end
 
   def validate(oembed)
-    oembed if oembed[:version].to_s == '1.0' && oembed[:type].present?
+    oembed if oembed.present? && oembed[:version].to_s == '1.0' && oembed[:type].present?
   end
 
   def html

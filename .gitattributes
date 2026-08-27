@@ -12,3 +12,10 @@
 *.woff                        -text
 *.woff2                       -text
 spec/fixtures/requests/**     -text !eol
+
+# Custom attributes for PR diff exclusion
+/.agents/**                    kgtkr-meta
+/README.md                     kgtkr-meta
+/.gitattributes                kgtkr-meta
+*kgtkr*                       kgtkr-meta
+*kgtkr*/**                    kgtkr-meta

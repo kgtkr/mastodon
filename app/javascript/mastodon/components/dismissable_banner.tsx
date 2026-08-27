@@ -1,9 +1,10 @@
-import type { PropsWithChildren } from 'react';
-import { useCallback, useState } from 'react';
+import type { FC, ReactNode } from 'react';
 
 import { defineMessages, useIntl } from 'react-intl';
 
-import { bannerSettings } from 'mastodon/settings';
+import CloseIcon from '@/material-icons/400-24px/close.svg?react';
+
+import { useDismissible } from '../hooks/useDismissible';
 
 import { IconButton } from './icon_button';
 
@@ -13,21 +14,14 @@ const messages = defineMessages({
 
 interface Props {
   id: string;
+  children: ReactNode;
 }
 
-export const DismissableBanner: React.FC<PropsWithChildren<Props>> = ({
-  id,
-  children,
-}) => {
-  const [visible, setVisible] = useState(!bannerSettings.get(id));
+export const DismissableBanner: FC<Props> = ({ id, children }) => {
   const intl = useIntl();
+  const { wasDismissed, dismiss } = useDismissible(id);
 
-  const handleDismiss = useCallback(() => {
-    setVisible(false);
-    bannerSettings.set(id, true);
-  }, [id]);
-
-  if (!visible) {
+  if (wasDismissed) {
     return null;
   }
 
@@ -36,8 +30,9 @@ export const DismissableBanner: React.FC<PropsWithChildren<Props>> = ({
       <div className='dismissable-banner__action'>
         <IconButton
           icon='times'
+          iconComponent={CloseIcon}
           title={intl.formatMessage(messages.dismiss)}
-          onClick={handleDismiss}
+          onClick={dismiss}
         />
       </div>
 

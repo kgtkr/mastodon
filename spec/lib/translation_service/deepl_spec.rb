@@ -8,15 +8,30 @@ RSpec.describe TranslationService::DeepL do
   let(:plan) { 'advanced' }
 
   before do
-    stub_request(:get, 'https://api.deepl.com/v2/languages?type=source').to_return(
-      body: '[{"language":"EN","name":"English"},{"language":"UK","name":"Ukrainian"}]'
-    )
-    stub_request(:get, 'https://api.deepl.com/v2/languages?type=target').to_return(
-      body: '[{"language":"EN-GB","name":"English (British)"},{"language":"ZH","name":"Chinese"}]'
-    )
+    %w(api-free.deepl.com api.deepl.com).each do |host|
+      stub_request(:get, "https://#{host}/v2/languages?type=source").to_return(
+        body: '[{"language":"EN","name":"English"},{"language":"UK","name":"Ukrainian"}]'
+      )
+      stub_request(:get, "https://#{host}/v2/languages?type=target").to_return(
+        body: '[{"language":"EN-GB","name":"English (British)"},{"language":"ZH","name":"Chinese"}]'
+      )
+    end
   end
 
   describe '#translate' do
+    context 'with invalid body response' do
+      before do
+        stub_request(:post, 'https://api.deepl.com/v2/translate')
+          .with(body: 'text=Hasta+la+vista&source_lang=ES&target_lang=en&tag_handling=html')
+          .to_return(body: 'XXX')
+      end
+
+      it 'handles error and re-raises' do
+        expect { service.translate(['Hasta la vista'], 'es', 'en') }
+          .to raise_error(TranslationService::UnexpectedResponseError)
+      end
+    end
+
     it 'returns translation with specified source language' do
       stub_request(:post, 'https://api.deepl.com/v2/translate')
         .with(body: 'text=Hasta+la+vista&source_lang=ES&target_lang=en&tag_handling=html')
@@ -73,28 +88,25 @@ RSpec.describe TranslationService::DeepL do
     end
   end
 
-  describe '#request' do
+  describe 'the paid and free plan api hostnames' do
     before do
-      stub_request(:any, //)
-      # rubocop:disable Lint/EmptyBlock
-      service.send(:request, :get, '/v2/languages') { |res| }
-      # rubocop:enable Lint/EmptyBlock
+      service.languages
     end
 
-    it 'uses paid plan base URL' do
-      expect(a_request(:get, 'https://api.deepl.com/v2/languages')).to have_been_made.once
-    end
-
-    context 'with free plan' do
-      let(:plan) { 'free' }
-
-      it 'uses free plan base URL' do
-        expect(a_request(:get, 'https://api-free.deepl.com/v2/languages')).to have_been_made.once
+    context 'without a plan set' do
+      it 'uses paid plan base URL and sends an API key' do
+        expect(a_request(:get, 'https://api.deepl.com/v2/languages?type=source').with(headers: { Authorization: 'DeepL-Auth-Key my-api-key' })).to have_been_made.once
+        expect(a_request(:get, 'https://api.deepl.com/v2/languages?type=target').with(headers: { Authorization: 'DeepL-Auth-Key my-api-key' })).to have_been_made.once
       end
     end
 
-    it 'sends API key' do
-      expect(a_request(:get, 'https://api.deepl.com/v2/languages').with(headers: { Authorization: 'DeepL-Auth-Key my-api-key' })).to have_been_made.once
+    context 'with the free plan' do
+      let(:plan) { 'free' }
+
+      it 'uses free plan base URL and sends an API key' do
+        expect(a_request(:get, 'https://api-free.deepl.com/v2/languages?type=source').with(headers: { Authorization: 'DeepL-Auth-Key my-api-key' })).to have_been_made.once
+        expect(a_request(:get, 'https://api-free.deepl.com/v2/languages?type=target').with(headers: { Authorization: 'DeepL-Auth-Key my-api-key' })).to have_been_made.once
+      end
     end
   end
 end

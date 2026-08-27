@@ -5,19 +5,19 @@
 # Table name: account_statuses_cleanup_policies
 #
 #  id                 :bigint(8)        not null, primary key
-#  account_id         :bigint(8)        not null
 #  enabled            :boolean          default(TRUE), not null
-#  min_status_age     :integer          default(1209600), not null
 #  keep_direct        :boolean          default(TRUE), not null
+#  keep_media         :boolean          default(FALSE), not null
 #  keep_pinned        :boolean          default(TRUE), not null
 #  keep_polls         :boolean          default(FALSE), not null
-#  keep_media         :boolean          default(FALSE), not null
-#  keep_self_fav      :boolean          default(TRUE), not null
 #  keep_self_bookmark :boolean          default(TRUE), not null
+#  keep_self_fav      :boolean          default(TRUE), not null
 #  min_favs           :integer
 #  min_reblogs        :integer
+#  min_status_age     :integer          default(1209600), not null
 #  created_at         :datetime         not null
 #  updated_at         :datetime         not null
+#  account_id         :bigint(8)        not null
 #
 class AccountStatusesCleanupPolicy < ApplicationRecord
   include Redisable
@@ -130,7 +130,7 @@ class AccountStatusesCleanupPolicy < ApplicationRecord
   end
 
   def without_direct_scope
-    Status.where.not(visibility: :direct)
+    Status.not_direct_visibility
   end
 
   def old_enough_scope(max_id = nil)
@@ -145,23 +145,23 @@ class AccountStatusesCleanupPolicy < ApplicationRecord
   end
 
   def without_self_fav_scope
-    Status.where('NOT EXISTS (SELECT 1 FROM favourites fav WHERE fav.account_id = statuses.account_id AND fav.status_id = statuses.id)')
+    Status.where.not(self_status_reference_exists(Favourite))
   end
 
   def without_self_bookmark_scope
-    Status.where('NOT EXISTS (SELECT 1 FROM bookmarks bookmark WHERE bookmark.account_id = statuses.account_id AND bookmark.status_id = statuses.id)')
+    Status.where.not(self_status_reference_exists(Bookmark))
   end
 
   def without_pinned_scope
-    Status.where('NOT EXISTS (SELECT 1 FROM status_pins pin WHERE pin.account_id = statuses.account_id AND pin.status_id = statuses.id)')
+    Status.where.not(self_status_reference_exists(StatusPin))
   end
 
   def without_media_scope
-    Status.where('NOT EXISTS (SELECT 1 FROM media_attachments media WHERE media.status_id = statuses.id)')
+    Status.where.not(status_media_reference_exists)
   end
 
   def without_poll_scope
-    Status.where(poll_id: nil)
+    Status.without_polls
   end
 
   def without_popular_scope
@@ -173,5 +173,22 @@ class AccountStatusesCleanupPolicy < ApplicationRecord
 
   def account_statuses
     Status.where(account_id: account_id)
+  end
+
+  def status_media_reference_exists
+    MediaAttachment
+      .where(MediaAttachment.arel_table[:status_id].eq Status.arel_table[:id])
+      .select(1)
+      .arel
+      .exists
+  end
+
+  def self_status_reference_exists(model)
+    model
+      .where(model.arel_table[:account_id].eq Status.arel_table[:account_id])
+      .where(model.arel_table[:status_id].eq Status.arel_table[:id])
+      .select(1)
+      .arel
+      .exists
   end
 end

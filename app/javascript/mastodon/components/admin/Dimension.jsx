@@ -26,7 +26,7 @@ export default class Dimension extends PureComponent {
   componentDidMount () {
     const { start_at, end_at, dimension, limit, params } = this.props;
 
-    api().post('/api/v1/admin/dimensions', { keys: [dimension], start_at, end_at, limit, [dimension]: params }).then(res => {
+    api(false).post('/api/v1/admin/dimensions', { keys: [dimension], start_at, end_at, limit, [dimension]: params }).then(res => {
       this.setState({
         loading: false,
         data: res.data,
@@ -85,7 +85,7 @@ export default class Dimension extends PureComponent {
 
     return (
       <div className='dimension'>
-        <h4>{label}</h4>
+        <h2>{label}</h2>
 
         {content}
       </div>

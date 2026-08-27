@@ -2,14 +2,15 @@
 
 class ActivityPub::NoteSerializer < ActivityPub::Serializer
   include FormattingHelper
+  include JsonLdHelper
 
-  context_extensions :atom_uri, :conversation, :sensitive, :voters_count
+  context_extensions :atom_uri, :conversation, :sensitive, :voters_count, :quotes, :interaction_policies
 
   attributes :id, :type, :summary,
              :in_reply_to, :published, :url,
              :attributed_to, :to, :cc, :sensitive,
              :atom_uri, :in_reply_to_atom_uri,
-             :conversation
+             :conversation, :context
 
   attribute :content
   attribute :content_map, if: :language?
@@ -19,6 +20,8 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
   has_many :virtual_tags, key: :tag
 
   has_one :replies, serializer: ActivityPub::CollectionSerializer, if: :local?
+  has_one :likes, serializer: ActivityPub::CollectionSerializer, if: :local?
+  has_one :shares, serializer: ActivityPub::CollectionSerializer, if: :local?
 
   has_many :poll_options, key: :one_of, if: :poll_and_not_multiple?
   has_many :poll_options, key: :any_of, if: :poll_and_multiple?
@@ -27,6 +30,13 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
   attribute :closed, if: :poll_and_expired?
 
   attribute :voters_count, if: :poll_and_voters_count?
+
+  attribute :quote, if: :quote?
+  attribute :quote, key: :_misskey_quote, if: :serializable_quote?
+  attribute :quote, key: :quote_uri, if: :serializable_quote?
+  attribute :quote_authorization, if: :quote_authorization?
+
+  attribute :interaction_policy
 
   def id
     ActivityPub::TagManager.instance.uri_for(object)
@@ -61,6 +71,22 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
         items: replies.map(&:second),
         next: last_id ? ActivityPub::TagManager.instance.replies_uri_for(object, page: true, min_id: last_id) : ActivityPub::TagManager.instance.replies_uri_for(object, page: true, only_other_accounts: true)
       )
+    )
+  end
+
+  def likes
+    ActivityPub::CollectionPresenter.new(
+      id: ActivityPub::TagManager.instance.likes_uri_for(object),
+      type: :unordered,
+      size: object.favourites_count
+    )
+  end
+
+  def shares
+    ActivityPub::CollectionPresenter.new(
+      id: ActivityPub::TagManager.instance.shares_uri_for(object),
+      type: :unordered,
+      size: object.reblogs_count
     )
   end
 
@@ -113,7 +139,7 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
   end
 
   def virtual_tags
-    object.active_mentions.to_a.sort_by(&:id) + object.tags + object.emojis
+    object.active_mentions.to_a.sort_by(&:id) + object.tags + object.emojis + object.tagged_objects.map(&:object)
   end
 
   def atom_uri
@@ -134,8 +160,16 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
     if object.conversation.uri?
       object.conversation.uri
     else
-      OStatus::TagManager.instance.unique_tag(object.conversation.created_at, object.conversation.id, 'Conversation')
+      # This means `parent_status_id` and `parent_account_id` must *not* get backfilled
+      ActivityPub::TagManager.instance.uri_for(object.conversation) || OStatus::TagManager.instance.unique_tag(object.conversation.created_at, object.conversation.id, 'Conversation')
     end
+  end
+
+  def context
+    return if object.conversation.nil?
+
+    uri = ActivityPub::TagManager.instance.uri_for(object.conversation)
+    uri unless unsupported_uri_scheme?(uri)
   end
 
   def local?
@@ -176,6 +210,44 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
     object.preloadable_poll&.voters_count
   end
 
+  def quote?
+    object.quote&.present?
+  end
+
+  def serializable_quote?
+    object.quote&.quoted_status&.present?
+  end
+
+  def quote_authorization?
+    object.quote.present? && ActivityPub::TagManager.instance.approval_uri_for(object.quote).present?
+  end
+
+  def quote
+    # TODO: handle inlining self-quotes
+    object.quote.quoted_status.present? ? ActivityPub::TagManager.instance.uri_for(object.quote.quoted_status) : { type: 'Tombstone' }
+  end
+
+  def quote_authorization
+    ActivityPub::TagManager.instance.approval_uri_for(object.quote)
+  end
+
+  def interaction_policy
+    approved_uris = []
+
+    # On outgoing posts, only automatic approval is supported
+    policy = object.quote_interaction_policy.automatic
+    approved_uris << ActivityPub::TagManager::COLLECTIONS[:public] if policy.public?
+    approved_uris << ActivityPub::TagManager.instance.followers_uri_for(object.account) if policy.followers?
+    approved_uris << ActivityPub::TagManager.instance.following_uri_for(object.account) if policy.following?
+    approved_uris << ActivityPub::TagManager.instance.uri_for(object.account) if approved_uris.empty?
+
+    {
+      canQuote: {
+        automaticApproval: approved_uris,
+      },
+    }
+  end
+
   class MediaAttachmentSerializer < ActivityPub::Serializer
     context_extensions :blurhash, :focal_point
 
@@ -185,6 +257,7 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
     attribute :focal_point, if: :focal_point?
     attribute :width, if: :width?
     attribute :height, if: :height?
+    attribute :duration, if: :duration?
 
     has_one :icon, serializer: ActivityPub::ImageSerializer, if: :thumbnail?
 
@@ -228,12 +301,20 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
       object.file.meta&.dig('original', 'height').present?
     end
 
+    def duration?
+      object.file.meta&.dig('original', 'duration').present?
+    end
+
     def width
       object.file.meta.dig('original', 'width')
     end
 
     def height
       object.file.meta.dig('original', 'height')
+    end
+
+    def duration
+      object.file.meta.dig('original', 'duration').seconds.iso8601
     end
   end
 
@@ -273,8 +354,9 @@ class ActivityPub::NoteSerializer < ActivityPub::Serializer
     end
   end
 
-  class CustomEmojiSerializer < ActivityPub::EmojiSerializer
-  end
+  class CustomEmojiSerializer < ActivityPub::EmojiSerializer; end
+
+  class CollectionSerializer < ActivityPub::FeaturedCollectionSerializer; end
 
   class OptionSerializer < ActivityPub::Serializer
     class RepliesSerializer < ActivityPub::Serializer
