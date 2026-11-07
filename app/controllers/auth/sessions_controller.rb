@@ -17,6 +17,7 @@ class Auth::SessionsController < Devise::SessionsController
   prepend_before_action :check_suspicious!, only: [:create]
 
   include Auth::TwoFactorAuthenticationConcern
+  include Auth::SignInTokenAuthenticationConcern
 
   content_security_policy only: :new do |p|
     p.form_action(false)
@@ -51,12 +52,18 @@ class Auth::SessionsController < Devise::SessionsController
   def find_user_from_params
     user   = User.authenticate_with_ldap(user_params) if Devise.ldap_authentication
     user ||= User.authenticate_with_pam(user_params) if Devise.pam_authentication
-    user ||= User.find_for_authentication(email: user_params[:email])
-    user
+
+    if user.present?
+      @password_verified_externally = true
+      return user
+    end
+
+    user = User.find_for_authentication(email: user_params[:email])
+    user if user&.encrypted_password.present?
   end
 
   def user_params
-    params.expect(user: [:email, :password, :otp_attempt, credential: {}])
+    params.expect(user: [:email, :password, :otp_attempt, :sign_in_token_attempt, credential: {}])
   end
 
   def after_sign_in_path_for(resource)
@@ -162,6 +169,10 @@ class Auth::SessionsController < Devise::SessionsController
         success: false
       )
     )
+
+    # No need to send a mail for failure to log in with a sign-in token, as that goes throug a mail
+    # as well
+    return if security_measure == :sign_in_token
 
     # Only send a notification email every hour at most
     return if redis.set("2fa_failure_notification:#{user.id}", '1', ex: 1.hour, get: true).present?
