@@ -23,4 +23,19 @@ if [[ "$CURRENT_BRANCH" != kgtkr/update/* ]]; then
   git merge --ff-only origin/kgtkr-master || true
 fi
 
-git merge "v$VERSION" --no-edit || true
+BASE_TAG=$(git tag --merged HEAD -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+
+CUSTOM_PATCH=$(mktemp)
+git diff --binary "$BASE_TAG" HEAD > "$CUSTOM_PATCH"
+
+git merge --no-commit --no-ff -s ours "v$VERSION"
+git read-tree --reset -u "v$VERSION"
+
+if [ -s "$CUSTOM_PATCH" ]; then
+  git apply --3way "$CUSTOM_PATCH" || true
+fi
+rm -f "$CUSTOM_PATCH"
+
+if [ -z "$(git diff --name-only --diff-filter=U)" ]; then
+  GIT_MERGE_AUTOEDIT=no git commit --no-edit
+fi
