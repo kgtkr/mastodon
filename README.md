@@ -1,8 +1,9 @@
 ## 更新方法
-* `kgtkr-master`: 独自パッチを当てたメインのブランチ(本家 `main` に対応)
-* `kgtkr-$MINOR_VERSION`: マイナーバージョンごとのブランチ(本家 `stable-$MINOR_VERSION` に対応)
-  * こっちには独自のパッチは当てない。パッチを当てる場合は `kgtkr-master` に当ててからマージする。
-* `mstdn.kgtkr.net`: サーバーで使うイメージ用ブランチ。最新の `kgtkr-$MINOR_VERSION` と同一のコミットを参照する(履歴はマイナーバージョンが変わると破壊される)
+
+- `kgtkr-master`: 独自パッチを当てたメインのブランチ(本家 `main` に対応)
+- `kgtkr-$MINOR_VERSION`: マイナーバージョンごとのブランチ(本家 `stable-$MINOR_VERSION` に対応)
+  - こっちには独自のパッチは当てない。パッチを当てる場合は `kgtkr-master` に当ててからマージする。
+- `mstdn.kgtkr.net`: サーバーで使うイメージ用ブランチ。最新の `kgtkr-$MINOR_VERSION` と同一のコミットを参照する(履歴はマイナーバージョンが変わると破壊される)
 
 ```sh
 # コンフリクトの解消がない場合はkgtkr-update actionsを使っても良い
