@@ -8,7 +8,7 @@ RUN apt-get update && \
 COPY . /workdir
 WORKDIR /workdir
 ARG BASE_TAG
-RUN git diff "$BASE_TAG" -- ':!kgtkr.Dockerfile' > kgtkr.diff
+RUN git diff "$BASE_TAG" -- ':(exclude,attr:kgtkr-meta)' > kgtkr.diff
 
 FROM tootsuite/mastodon:$BASE_TAG
 
