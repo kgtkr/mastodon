@@ -10,6 +10,13 @@ permissions:
 jobs:
   build-image:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: mastodon
+            dockerfile: kgtkr.Dockerfile
+          - image: mastodon-streaming
+            dockerfile: kgtkr.streaming.Dockerfile
     steps:
       - uses: actions/checkout@v3
         with:
@@ -27,7 +34,7 @@ jobs:
         uses: kgtkr/docker-tags-gen-action@master
         id: tags
         with:
-          name: ghcr.io/${{ github.repository_owner }}/mastodon
+          name: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
       - id: base_tag
         run: |
           BASE_TAG=$(git tag --merged HEAD -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
@@ -41,8 +48,8 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          file: kgtkr.Dockerfile
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          file: ${{ matrix.dockerfile }}
           build-args: |
             BASE_TAG=${{ steps.base_tag.outputs.BASE_TAG }}
